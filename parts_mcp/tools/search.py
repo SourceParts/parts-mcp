@@ -5,6 +5,13 @@ import logging
 from typing import Dict, Any, List, Optional
 from fastmcp import FastMCP
 
+from parts_mcp.utils.api_client import (
+    get_client, 
+    SourcePartsAPIError,
+    SourcePartsAuthError
+)
+from parts_mcp.utils.cache import cache_search_results, cache_part_details
+
 logger = logging.getLogger(__name__)
 
 
@@ -16,6 +23,7 @@ def register_search_tools(mcp: FastMCP) -> None:
     """
     
     @mcp.tool()
+    @cache_search_results()
     async def search_parts(
         query: str,
         category: Optional[str] = None,
@@ -33,47 +41,61 @@ def register_search_tools(mcp: FastMCP) -> None:
         Returns:
             Search results with part information
         """
-        # This is a placeholder implementation
-        # In production, this would call the Source Parts API
-        
-        results = {
-            "query": query,
-            "category": category,
-            "filters": filters or {},
-            "results": [
-                {
-                    "part_number": "RC0805FR-0710KL",
-                    "manufacturer": "Yageo",
-                    "description": "RES SMD 10K OHM 1% 1/8W 0805",
-                    "category": "resistor",
-                    "parameters": {
-                        "resistance": "10kΩ",
-                        "tolerance": "±1%",
-                        "power_rating": "0.125W",
-                        "package": "0805 (2012 Metric)"
-                    },
-                    "suppliers": [
-                        {
-                            "name": "Digi-Key",
-                            "sku": "311-10.0KCRCT-ND",
-                            "stock": 485000,
-                            "price_breaks": [
-                                {"quantity": 1, "price": 0.10},
-                                {"quantity": 10, "price": 0.016},
-                                {"quantity": 100, "price": 0.00385}
-                            ]
-                        }
-                    ]
-                }
-            ],
-            "total_results": 1,
-            "message": "Search functionality will be implemented with Source Parts API"
-        }
-        
-        logger.info(f"Searched for parts with query: {query}")
-        return results
+        try:
+            client = get_client()
+            
+            # Build filters
+            search_filters = filters or {}
+            if category:
+                search_filters['category'] = category
+            
+            # Perform search
+            results = client.search_parts(
+                query=query,
+                filters=search_filters,
+                page=1,
+                page_size=limit
+            )
+            
+            # Format results
+            formatted_results = {
+                "query": query,
+                "category": category,
+                "filters": filters or {},
+                "results": results.get('results', []),
+                "total_results": results.get('total', 0),
+                "success": True
+            }
+            
+            logger.info(f"Found {formatted_results['total_results']} results for query: {query}")
+            return formatted_results
+            
+        except SourcePartsAuthError as e:
+            logger.error(f"Authentication error: {e}")
+            return {
+                "query": query,
+                "error": "Authentication failed. Please check your API key.",
+                "success": False
+            }
+            
+        except SourcePartsAPIError as e:
+            logger.error(f"API error during search: {e}")
+            return {
+                "query": query,
+                "error": f"Search failed: {str(e)}",
+                "success": False
+            }
+            
+        except Exception as e:
+            logger.error(f"Unexpected error during search: {e}")
+            return {
+                "query": query,
+                "error": f"An unexpected error occurred: {str(e)}",
+                "success": False
+            }
     
     @mcp.tool()
+    @cache_search_results()
     async def search_by_parameters(
         parameters: Dict[str, Any],
         category: str,
@@ -89,14 +111,36 @@ def register_search_tools(mcp: FastMCP) -> None:
         Returns:
             Matching parts
         """
-        return {
-            "category": category,
-            "parameters": parameters,
-            "results": [],
-            "message": "Parametric search will be implemented with Source Parts API"
-        }
+        try:
+            client = get_client()
+            
+            # Perform parametric search
+            results = client.search_by_parameters(
+                category=category,
+                parameters=parameters,
+                page=1,
+                page_size=limit
+            )
+            
+            return {
+                "category": category,
+                "parameters": parameters,
+                "results": results.get('results', []),
+                "total_results": results.get('total', 0),
+                "success": True
+            }
+            
+        except SourcePartsAPIError as e:
+            logger.error(f"Parametric search error: {e}")
+            return {
+                "category": category,
+                "parameters": parameters,
+                "error": f"Search failed: {str(e)}",
+                "success": False
+            }
     
     @mcp.tool()
+    @cache_part_details()
     async def get_part_details(
         part_number: str,
         manufacturer: Optional[str] = None
@@ -110,9 +154,52 @@ def register_search_tools(mcp: FastMCP) -> None:
         Returns:
             Detailed part information
         """
-        return {
-            "part_number": part_number,
-            "manufacturer": manufacturer,
-            "details": {},
-            "message": "Part details lookup will be implemented with Source Parts API"
-        }
+        try:
+            client = get_client()
+            
+            # First search for the part
+            search_query = part_number
+            if manufacturer:
+                search_query = f"{manufacturer} {part_number}"
+                
+            search_results = client.search_parts(search_query, page_size=1)
+            
+            if not search_results.get('results'):
+                return {
+                    "part_number": part_number,
+                    "manufacturer": manufacturer,
+                    "error": "Part not found",
+                    "success": False
+                }
+                
+            # Get the first result's ID
+            part_data = search_results['results'][0]
+            part_id = part_data.get('id', part_data.get('part_id'))
+            
+            if part_id:
+                # Get detailed information
+                details = client.get_part_details(part_id)
+                
+                return {
+                    "part_number": part_number,
+                    "manufacturer": manufacturer,
+                    "details": details,
+                    "success": True
+                }
+            else:
+                # Return search result as details
+                return {
+                    "part_number": part_number,
+                    "manufacturer": manufacturer,
+                    "details": part_data,
+                    "success": True
+                }
+                
+        except SourcePartsAPIError as e:
+            logger.error(f"Error getting part details: {e}")
+            return {
+                "part_number": part_number,
+                "manufacturer": manufacturer,
+                "error": f"Failed to get details: {str(e)}",
+                "success": False
+            }
