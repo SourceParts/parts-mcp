@@ -48,6 +48,7 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "diskcache>=5.0.0",
     "pandas>=2.0.0",
+    "defusedxml>=0.7.0",
 ]
 
 [project.urls]

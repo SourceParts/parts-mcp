@@ -8,6 +8,23 @@ from typing import Dict, Any, List, Optional
 from fastmcp import FastMCP
 
 from parts_mcp.config import KICAD_SEARCH_PATHS
+from parts_mcp.utils.kicad_utils import (
+    find_kicad_projects,
+    get_project_files,
+    extract_project_info,
+    run_kicad_cli,
+    open_kicad_project as open_project_util
+)
+from parts_mcp.utils.bom_parser import (
+    parse_bom_file,
+    analyze_bom_data,
+    export_bom_summary
+)
+from parts_mcp.utils.netlist_parser import (
+    NetlistParser,
+    extract_netlist_from_schematic,
+    analyze_connectivity
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,13 +56,62 @@ def register_kicad_tools(mcp: FastMCP) -> None:
             if not path.suffix == ".kicad_pro":
                 return {"error": "Please provide a .kicad_pro file"}
             
-            # This is a placeholder - actual implementation would parse KiCad files
-            return {
-                "project": path.name,
-                "components": [],
-                "total_parts": 0,
-                "message": "KiCad BOM extraction will be implemented"
-            }
+            # Get project files
+            files = get_project_files(project_path)
+            
+            # Look for existing BOM files
+            bom_results = []
+            for file_type, file_path in files.items():
+                if "bom" in file_type.lower() or (
+                    file_path.endswith('.csv') and 'bom' in Path(file_path).stem.lower()
+                ):
+                    components, format_info = parse_bom_file(file_path)
+                    if components:
+                        analysis = analyze_bom_data(components)
+                        bom_results.append({
+                            "file": Path(file_path).name,
+                            "format": format_info.get("detected_format", "unknown"),
+                            "component_count": len(components),
+                            "analysis": analysis
+                        })
+            
+            # If no BOM found, try to generate one using KiCad CLI
+            if not bom_results and "schematic" in files:
+                logger.info("No BOM files found, attempting to generate using KiCad CLI")
+                
+                # Try to export BOM using CLI
+                output_file = path.parent / f"{path.stem}_bom.csv"
+                result = run_kicad_cli([
+                    "sch", "export", "bom",
+                    "--output", str(output_file),
+                    files["schematic"]
+                ])
+                
+                if result["success"] and output_file.exists():
+                    components, format_info = parse_bom_file(str(output_file))
+                    if components:
+                        analysis = analyze_bom_data(components)
+                        bom_results.append({
+                            "file": output_file.name,
+                            "format": "kicad_generated",
+                            "component_count": len(components),
+                            "analysis": analysis,
+                            "generated": True
+                        })
+            
+            if bom_results:
+                return {
+                    "project": path.name,
+                    "bom_files": bom_results,
+                    "total_files": len(bom_results),
+                    "success": True
+                }
+            else:
+                return {
+                    "project": path.name,
+                    "error": "No BOM files found and unable to generate",
+                    "hint": "Export a BOM from KiCad or ensure schematic file exists"
+                }
             
         except Exception as e:
             logger.error(f"Error extracting BOM: {e}")
@@ -58,18 +124,10 @@ def register_kicad_tools(mcp: FastMCP) -> None:
         Returns:
             List of found KiCad projects
         """
-        projects = []
+        projects = find_kicad_projects()
         
-        for search_path in KICAD_SEARCH_PATHS:
-            path = Path(search_path)
-            if path.exists():
-                # Find all .kicad_pro files
-                for proj_file in path.rglob("*.kicad_pro"):
-                    projects.append({
-                        "name": proj_file.stem,
-                        "path": str(proj_file),
-                        "directory": str(proj_file.parent)
-                    })
+        # Sort by modification time (newest first)
+        projects.sort(key=lambda x: x.get('modified', 0), reverse=True)
         
         return {
             "projects": projects,
@@ -100,6 +158,96 @@ def register_kicad_tools(mcp: FastMCP) -> None:
         }
     
     @mcp.tool()
+    async def analyze_kicad_project(
+        project_path: str
+    ) -> Dict[str, Any]:
+        """Analyze a KiCad project to extract detailed information.
+        
+        Args:
+            project_path: Path to KiCad project file (.kicad_pro)
+            
+        Returns:
+            Detailed project analysis
+        """
+        try:
+            info = extract_project_info(project_path)
+            
+            # Add file counts
+            info["file_counts"] = {
+                "total": len(info["files"]),
+                "schematics": sum(1 for f in info["files"].values() if f.endswith('.kicad_sch')),
+                "pcbs": sum(1 for f in info["files"].values() if f.endswith('.kicad_pcb')),
+                "data_files": sum(1 for f in info["files"].values() 
+                                if any(f.endswith(ext) for ext in ['.csv', '.pos', '.net']))
+            }
+            
+            return info
+            
+        except Exception as e:
+            logger.error(f"Error analyzing project: {e}")
+            return {"error": str(e)}
+    
+    @mcp.tool()
+    async def extract_netlist_from_project(
+        project_path: str
+    ) -> Dict[str, Any]:
+        """Extract netlist information from a KiCad project.
+        
+        Args:
+            project_path: Path to KiCad project file (.kicad_pro)
+            
+        Returns:
+            Netlist information
+        """
+        try:
+            path = Path(project_path)
+            if not path.exists():
+                return {"error": f"Project file not found: {project_path}"}
+                
+            files = get_project_files(project_path)
+            
+            # Check for existing netlist file
+            if "netlist_data" in files or "net" in files:
+                netlist_file = files.get("netlist_data", files.get("net"))
+                parser = NetlistParser(netlist_file)
+                netlist_data = parser.parse()
+                
+                # Add connectivity analysis
+                if "error" not in netlist_data:
+                    netlist_data["analysis"] = analyze_connectivity(netlist_data)
+                    
+                return netlist_data
+                
+            # Try to extract from schematic
+            elif "schematic" in files:
+                netlist_data = extract_netlist_from_schematic(files["schematic"])
+                return netlist_data
+                
+            else:
+                return {
+                    "error": "No netlist or schematic file found",
+                    "hint": "Generate a netlist from KiCad or ensure schematic exists"
+                }
+                
+        except Exception as e:
+            logger.error(f"Error extracting netlist: {e}")
+            return {"error": str(e)}
+    
+    @mcp.tool()
+    async def open_in_kicad(
+        project_path: str
+    ) -> Dict[str, Any]:
+        """Open a KiCad project in the KiCad application.
+        
+        Args:
+            project_path: Path to KiCad project file
+            
+        Returns:
+            Operation result
+        """
+        return open_project_util(project_path)
+    
+    @mcp.tool()
     async def export_parts_to_kicad(
         parts: List[Dict[str, Any]],
         output_path: str,
@@ -120,24 +268,62 @@ def register_kicad_tools(mcp: FastMCP) -> None:
             path.parent.mkdir(parents=True, exist_ok=True)
             
             if format == "csv":
-                # Placeholder CSV export
+                # Create KiCad-compatible CSV
+                import csv
+                
+                with open(path, 'w', newline='') as f:
+                    # Define KiCad BOM headers
+                    headers = [
+                        'Reference', 'Value', 'Footprint', 'Datasheet',
+                        'Manufacturer', 'MPN', 'Supplier', 'SPN',
+                        'Quantity', 'Unit Price', 'Extended Price'
+                    ]
+                    
+                    writer = csv.DictWriter(f, fieldnames=headers)
+                    writer.writeheader()
+                    
+                    for part in parts:
+                        row = {
+                            'Reference': part.get('reference', ''),
+                            'Value': part.get('value', ''),
+                            'Footprint': part.get('footprint', ''),
+                            'Datasheet': part.get('datasheet', ''),
+                            'Manufacturer': part.get('manufacturer', ''),
+                            'MPN': part.get('part_number', ''),
+                            'Supplier': part.get('supplier', ''),
+                            'SPN': part.get('supplier_part', ''),
+                            'Quantity': part.get('quantity', 1),
+                            'Unit Price': part.get('unit_price', ''),
+                            'Extended Price': part.get('extended_price', '')
+                        }
+                        writer.writerow(row)
+                
                 return {
                     "exported": True,
-                    "path": output_path,
+                    "path": str(path),
                     "format": format,
                     "parts_count": len(parts),
-                    "message": "CSV export will be implemented"
+                    "message": "Exported KiCad-compatible BOM"
                 }
+                
             elif format == "json":
-                # Placeholder JSON export
+                # Export as JSON with KiCad structure
+                kicad_data = {
+                    "source": "parts-mcp",
+                    "version": "1.0",
+                    "components": parts
+                }
+                
                 with open(path, 'w') as f:
-                    json.dump({"parts": parts}, f, indent=2)
+                    json.dump(kicad_data, f, indent=2)
+                    
                 return {
                     "exported": True,
-                    "path": output_path,
+                    "path": str(path),
                     "format": format,
                     "parts_count": len(parts)
                 }
+                
             else:
                 return {"error": f"Unsupported format: {format}"}
                 

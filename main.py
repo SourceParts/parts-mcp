@@ -18,9 +18,13 @@ def load_dotenv():
     """Load environment variables from .env file if it exists."""
     env_file = project_dir / ".env"
     if env_file.exists():
-        from dotenv import load_dotenv as _load_dotenv
-        _load_dotenv(env_file)
-        return True
+        try:
+            from dotenv import load_dotenv as _load_dotenv
+            _load_dotenv(env_file)
+            return True
+        except ImportError:
+            logging.warning("python-dotenv not installed, skipping .env file")
+            return False
     return False
 
 
