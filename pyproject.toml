@@ -52,14 +52,12 @@ dependencies = [
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/yourusername/parts-mcp"
-"Bug Tracker" = "https://github.com/yourusername/parts-mcp/issues"
-"Documentation" = "https://github.com/yourusername/parts-mcp#readme"
+"Homepage" = "https://github.com/SourceParts/parts-mcp"
+"Bug Tracker" = "https://github.com/SourceParts/parts-mcp/issues"
+"Documentation" = "https://source.parts/docs/api"
+"Source" = "https://github.com/SourceParts/parts-mcp"
 
-[project.scripts]
-parts-mcp = "parts_mcp.server:main"
-
-[dependency-groups]
+[project.optional-dependencies]
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.23.0",
@@ -69,6 +67,9 @@ dev = [
     "mypy>=1.8.0",
     "pre-commit>=3.0.0",
 ]
+
+[project.scripts]
+parts-mcp = "parts_mcp.server:main"
 
 [tool.ruff]
 target-version = "py310"
