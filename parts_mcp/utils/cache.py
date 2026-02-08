@@ -69,8 +69,9 @@ def cached(
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            # Generate cache key
-            cache_key = make_cache_key(*args[1:], **kwargs)  # Skip 'self' if present
+            # Generate cache key using all args
+            # (for methods, the first arg 'self' will be part of key which is fine)
+            cache_key = make_cache_key(*args, **kwargs)
             
             if key_prefix:
                 cache_key = f"{key_prefix}:{cache_key}"
@@ -165,17 +166,18 @@ def cache_delete(key: str) -> bool:
 
 def clear_cache_prefix(prefix: str) -> int:
     """Clear all cache entries with a given prefix.
-    
+
     Args:
         prefix: Key prefix to clear
-        
+
     Returns:
         Number of entries cleared
     """
     try:
         count = 0
-        for key in list(cache.keys()):
-            if key.startswith(prefix):
+        # diskcache uses iterkeys() instead of keys()
+        for key in list(cache.iterkeys()):
+            if isinstance(key, str) and key.startswith(prefix):
                 cache.delete(key)
                 count += 1
         logger.info(f"Cleared {count} cache entries with prefix '{prefix}'")

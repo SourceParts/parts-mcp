@@ -1,0 +1,15 @@
+Reference,Value,Footprint,Quantity,Manufacturer,MPN
+R1,10k,Resistor_SMD:R_0603_1608Metric,1,Yageo,RC0603FR-0710KL
+R2,10k,Resistor_SMD:R_0603_1608Metric,1,Yageo,RC0603FR-0710KL
+R3,4.7k,Resistor_SMD:R_0603_1608Metric,1,Yageo,RC0603FR-074K7L
+C1,100nF,Capacitor_SMD:C_0603_1608Metric,1,Murata,GRM188R71H104KA93D
+C2,10uF,Capacitor_SMD:C_0805_2012Metric,1,Samsung,CL21A106KAYNNNE
+C3,100uF,Capacitor_THT:CP_Radial_D6.3mm_P2.50mm,1,Panasonic,EEE-FK1C101P
+U1,STM32F407VGT6,Package_QFP:LQFP-100_14x14mm_P0.5mm,1,STMicroelectronics,STM32F407VGT6
+U2,LM7805,Package_TO_SOT_THT:TO-220-3_Vertical,1,Texas Instruments,LM7805CT
+D1,1N4148,Diode_SMD:D_SOD-123,1,ON Semiconductor,1N4148WS
+LED1,Red,LED_SMD:LED_0805_2012Metric,1,Kingbright,APHHS1005SURCK
+J1,USB-C,Connector_USB:USB_C_Receptacle,1,GCT,USB4105-GF-A
+SW1,Button,Button_Switch_SMD:SW_SPST_TL3342,1,E-Switch,TL3342F160QG
+Y1,8MHz,Crystal:Crystal_HC49-4H_Vertical,1,ECS,ECS-80-S-4X
+TP1,TestPoint,TestPoint:TestPoint_Pad_D1.0mm,1,,

@@ -193,46 +193,75 @@ def extract_project_info(project_path: str) -> Dict[str, Any]:
 
 def find_kicad_cli() -> Optional[str]:
     """Find the KiCad CLI executable.
-    
+
+    Searches in the following order:
+    1. KICAD_CLI_PATH environment variable
+    2. System PATH
+    3. Platform-specific default locations
+    4. Flatpak/Snap installations (Linux)
+
     Returns:
         Path to kicad-cli or None if not found
     """
     system = platform.system()
-    
+
     # Check environment variable first
     cli_path = os.environ.get("KICAD_CLI_PATH")
     if cli_path and os.path.exists(cli_path):
         return cli_path
-    
+
+    # Try to find in PATH first (works across platforms)
+    cli_path = shutil.which("kicad-cli")
+    if cli_path:
+        return cli_path
+
     # Platform-specific paths
     if system == "Darwin":  # macOS
         paths = [
+            # KiCad 9.x
             "/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli",
+            # KiCad 8.x and earlier
             "/Applications/KiCad.app/Contents/MacOS/kicad-cli",
+            # Homebrew installation
+            "/usr/local/bin/kicad-cli",
+            "/opt/homebrew/bin/kicad-cli",
+            # User-specific installations
+            str(Path.home() / "Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli"),
+            str(Path.home() / "Applications/KiCad.app/Contents/MacOS/kicad-cli"),
         ]
     elif system == "Windows":
-        paths = [
-            r"C:\Program Files\KiCad\8.0\bin\kicad-cli.exe",
-            r"C:\Program Files\KiCad\7.0\bin\kicad-cli.exe",
-            r"C:\Program Files\KiCad\bin\kicad-cli.exe",
-        ]
+        # Check common installation paths for KiCad 7, 8, 9
+        program_files = os.environ.get("ProgramFiles", r"C:\Program Files")
+        program_files_x86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+
+        paths = []
+        for version in ["9.0", "8.0", "7.0", ""]:
+            if version:
+                paths.append(os.path.join(program_files, "KiCad", version, "bin", "kicad-cli.exe"))
+                paths.append(os.path.join(program_files_x86, "KiCad", version, "bin", "kicad-cli.exe"))
+            else:
+                paths.append(os.path.join(program_files, "KiCad", "bin", "kicad-cli.exe"))
+                paths.append(os.path.join(program_files_x86, "KiCad", "bin", "kicad-cli.exe"))
+
     else:  # Linux
-        # Try to find in PATH
-        cli_path = shutil.which("kicad-cli")
-        if cli_path:
-            return cli_path
         paths = [
+            # Standard installations
             "/usr/bin/kicad-cli",
             "/usr/local/bin/kicad-cli",
+            # Flatpak installation
+            "/var/lib/flatpak/exports/bin/org.kicad.KiCad.kicad-cli",
+            str(Path.home() / ".local/share/flatpak/exports/bin/org.kicad.KiCad.kicad-cli"),
+            # Snap installation
+            "/snap/bin/kicad.kicad-cli",
+            "/snap/kicad/current/usr/bin/kicad-cli",
         ]
-    
+
     # Check each path
     for path in paths:
         if os.path.exists(path):
             return path
-            
-    # Try to find in PATH as last resort
-    return shutil.which("kicad-cli")
+
+    return None
 
 
 def run_kicad_cli(args: List[str], timeout: int = 30) -> Dict[str, Any]:
@@ -326,3 +355,320 @@ def open_kicad_project(project_path: str) -> Dict[str, Any]:
         
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+def get_kicad_version() -> Optional[Dict[str, Any]]:
+    """Get KiCad CLI version information.
+
+    Returns:
+        Dictionary with version info or None if CLI not found
+    """
+    cli_path = find_kicad_cli()
+    if not cli_path:
+        return None
+
+    try:
+        result = subprocess.run(
+            [cli_path, "version"],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+
+        if result.returncode == 0:
+            version_str = result.stdout.strip()
+            # Parse version string (e.g., "8.0.4" or "9.0.0-rc1")
+            import re
+            match = re.match(r"(\d+)\.(\d+)\.?(\d+)?", version_str)
+
+            version_info = {
+                "full_version": version_str,
+                "cli_path": cli_path
+            }
+
+            if match:
+                version_info["major"] = int(match.group(1))
+                version_info["minor"] = int(match.group(2))
+                version_info["patch"] = int(match.group(3)) if match.group(3) else 0
+
+            return version_info
+
+    except Exception as e:
+        logger.error(f"Error getting KiCad version: {e}")
+
+    return None
+
+
+def generate_bom_from_schematic(
+    schematic_path: str,
+    output_path: Optional[str] = None,
+    format: str = "csv",
+    fields: Optional[List[str]] = None
+) -> Dict[str, Any]:
+    """Generate a BOM from a KiCad schematic using kicad-cli.
+
+    Args:
+        schematic_path: Path to the .kicad_sch file
+        output_path: Output file path (auto-generated if None)
+        format: Output format ('csv', 'xml', or 'grouped')
+        fields: List of fields to include (None for defaults)
+
+    Returns:
+        Dictionary with result information and BOM path
+    """
+    if not os.path.exists(schematic_path):
+        return {"success": False, "error": f"Schematic not found: {schematic_path}"}
+
+    cli_path = find_kicad_cli()
+    if not cli_path:
+        return {"success": False, "error": "KiCad CLI not found"}
+
+    # Generate output path if not provided
+    if output_path is None:
+        schematic_dir = Path(schematic_path).parent
+        schematic_name = Path(schematic_path).stem
+        ext = ".xml" if format == "xml" else ".csv"
+        output_path = str(schematic_dir / f"{schematic_name}_bom{ext}")
+
+    # Build command
+    cmd = [cli_path, "sch", "export", "bom"]
+
+    # Add output path
+    cmd.extend(["-o", output_path])
+
+    # Add format-specific options
+    if format == "xml":
+        cmd.append("--format-preset")
+        cmd.append("xml")
+    elif format == "grouped":
+        cmd.append("--group-by")
+        cmd.append("Value,Footprint")
+
+    # Add custom fields if specified
+    if fields:
+        cmd.append("--fields")
+        cmd.append(",".join(fields))
+
+    # Add schematic path
+    cmd.append(schematic_path)
+
+    try:
+        logger.info(f"Generating BOM: {' '.join(cmd)}")
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+
+        if result.returncode == 0:
+            return {
+                "success": True,
+                "bom_path": output_path,
+                "format": format,
+                "command": ' '.join(cmd)
+            }
+        else:
+            return {
+                "success": False,
+                "error": result.stderr or "BOM generation failed",
+                "command": ' '.join(cmd),
+                "stdout": result.stdout
+            }
+
+    except subprocess.TimeoutExpired:
+        return {
+            "success": False,
+            "error": "BOM generation timed out",
+            "command": ' '.join(cmd)
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "command": ' '.join(cmd)
+        }
+
+
+def generate_netlist(
+    schematic_path: str,
+    output_path: Optional[str] = None,
+    format: str = "kicad"
+) -> Dict[str, Any]:
+    """Generate a netlist from a KiCad schematic using kicad-cli.
+
+    Args:
+        schematic_path: Path to the .kicad_sch file
+        output_path: Output file path (auto-generated if None)
+        format: Output format ('kicad', 'cadstar', 'orcadpcb2', 'spice')
+
+    Returns:
+        Dictionary with result information and netlist path
+    """
+    if not os.path.exists(schematic_path):
+        return {"success": False, "error": f"Schematic not found: {schematic_path}"}
+
+    cli_path = find_kicad_cli()
+    if not cli_path:
+        return {"success": False, "error": "KiCad CLI not found"}
+
+    # Generate output path if not provided
+    if output_path is None:
+        schematic_dir = Path(schematic_path).parent
+        schematic_name = Path(schematic_path).stem
+        ext = ".net" if format == "kicad" else f".{format}"
+        output_path = str(schematic_dir / f"{schematic_name}_netlist{ext}")
+
+    # Build command
+    cmd = [cli_path, "sch", "export", "netlist"]
+
+    # Add format
+    cmd.extend(["--format", format])
+
+    # Add output path
+    cmd.extend(["-o", output_path])
+
+    # Add schematic path
+    cmd.append(schematic_path)
+
+    try:
+        logger.info(f"Generating netlist: {' '.join(cmd)}")
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+
+        if result.returncode == 0:
+            return {
+                "success": True,
+                "netlist_path": output_path,
+                "format": format,
+                "command": ' '.join(cmd)
+            }
+        else:
+            return {
+                "success": False,
+                "error": result.stderr or "Netlist generation failed",
+                "command": ' '.join(cmd),
+                "stdout": result.stdout
+            }
+
+    except subprocess.TimeoutExpired:
+        return {
+            "success": False,
+            "error": "Netlist generation timed out",
+            "command": ' '.join(cmd)
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "command": ' '.join(cmd)
+        }
+
+
+def export_schematic_pdf(
+    schematic_path: str,
+    output_path: Optional[str] = None
+) -> Dict[str, Any]:
+    """Export a schematic to PDF using kicad-cli.
+
+    Args:
+        schematic_path: Path to the .kicad_sch file
+        output_path: Output PDF path (auto-generated if None)
+
+    Returns:
+        Dictionary with result information
+    """
+    if not os.path.exists(schematic_path):
+        return {"success": False, "error": f"Schematic not found: {schematic_path}"}
+
+    cli_path = find_kicad_cli()
+    if not cli_path:
+        return {"success": False, "error": "KiCad CLI not found"}
+
+    # Generate output path if not provided
+    if output_path is None:
+        schematic_dir = Path(schematic_path).parent
+        schematic_name = Path(schematic_path).stem
+        output_path = str(schematic_dir / f"{schematic_name}.pdf")
+
+    cmd = [cli_path, "sch", "export", "pdf", "-o", output_path, schematic_path]
+
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+
+        if result.returncode == 0:
+            return {
+                "success": True,
+                "pdf_path": output_path,
+                "command": ' '.join(cmd)
+            }
+        else:
+            return {
+                "success": False,
+                "error": result.stderr or "PDF export failed",
+                "command": ' '.join(cmd)
+            }
+
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def validate_kicad_installation() -> Dict[str, Any]:
+    """Validate KiCad installation and capabilities.
+
+    Returns:
+        Dictionary with installation status and capabilities
+    """
+    result = {
+        "installed": False,
+        "cli_available": False,
+        "cli_path": None,
+        "version": None,
+        "capabilities": []
+    }
+
+    # Check CLI availability
+    cli_path = find_kicad_cli()
+    if cli_path:
+        result["cli_available"] = True
+        result["cli_path"] = cli_path
+        result["installed"] = True
+
+        # Get version
+        version_info = get_kicad_version()
+        if version_info:
+            result["version"] = version_info
+
+            # Determine capabilities based on version
+            major = version_info.get("major", 0)
+
+            if major >= 7:
+                result["capabilities"].extend([
+                    "bom_export",
+                    "netlist_export",
+                    "pdf_export",
+                    "svg_export"
+                ])
+
+            if major >= 8:
+                result["capabilities"].extend([
+                    "drc",
+                    "erc",
+                    "pcb_export"
+                ])
+
+            if major >= 9:
+                result["capabilities"].append("advanced_bom_options")
+
+    return result
