@@ -3,12 +3,7 @@ Unit tests for value parsing utilities.
 """
 import pytest
 
-from parts_mcp.utils.value_parser import (
-    parse_value,
-    normalize_value,
-    values_match,
-    ParsedValue
-)
+from parts_mcp.utils.value_parser import normalize_value, parse_value, values_match
 
 
 class TestParseValue:

@@ -1,17 +1,18 @@
 """
 Unit tests for the Source Parts API client.
 """
-import pytest
-from unittest.mock import MagicMock, patch
 import time
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 from parts_mcp.utils.api_client import (
-    SourcePartsClient,
     SourcePartsAPIError,
     SourcePartsAuthError,
+    SourcePartsClient,
     SourcePartsRateLimitError,
+    close_client,
     get_client,
-    close_client
 )
 
 
@@ -152,7 +153,7 @@ class TestSearchParts:
             offset=100
         )
 
-        result = mock_api_client.search_parts("test", limit=50, offset=100)
+        mock_api_client.search_parts("test", limit=50, offset=100)
 
         call_kwargs = mock_api_client._mock_http.request.call_args
         params = call_kwargs.kwargs.get('params', {})
@@ -197,7 +198,7 @@ class TestGetPartInventory:
         """get_part_availability is an alias for get_part_inventory."""
         mock_api_client._mock_response.json.return_value = mock_api_response.inventory()
 
-        result = mock_api_client.get_part_availability("TEST123")
+        mock_api_client.get_part_availability("TEST123")
 
         # Should call the inventory endpoint
         call_kwargs = mock_api_client._mock_http.request.call_args

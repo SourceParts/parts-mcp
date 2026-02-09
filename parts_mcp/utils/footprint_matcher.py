@@ -3,10 +3,9 @@ Footprint/package matching utilities for electronic components.
 
 Handles equivalence between imperial/metric sizes and package variations.
 """
-import re
 import logging
+import re
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +28,7 @@ METRIC_TO_IMPERIAL = {v: k for k, v in IMPERIAL_TO_METRIC.items()}
 
 
 # Package family aliases (different names for same/compatible packages)
-PACKAGE_ALIASES: Dict[str, Set[str]] = {
+PACKAGE_ALIASES: dict[str, set[str]] = {
     'SOT-23': {'SOT23', 'SOT-23-3', 'TO-236', 'SC-59'},
     'SOT-23-5': {'SOT23-5', 'SOT-23-5L', 'SC-74A'},
     'SOT-23-6': {'SOT23-6', 'SOT-23-6L', 'SC-74'},
@@ -63,7 +62,7 @@ PACKAGE_ALIASES: Dict[str, Set[str]] = {
 }
 
 # Build reverse lookup for aliases
-PACKAGE_ALIAS_LOOKUP: Dict[str, str] = {}
+PACKAGE_ALIAS_LOOKUP: dict[str, str] = {}
 for canonical, aliases in PACKAGE_ALIASES.items():
     PACKAGE_ALIAS_LOOKUP[canonical.upper()] = canonical
     for alias in aliases:
@@ -74,11 +73,11 @@ for canonical, aliases in PACKAGE_ALIASES.items():
 class ParsedFootprint:
     """Represents a parsed footprint/package."""
     original: str
-    package_type: Optional[str]
-    size_imperial: Optional[str]
-    size_metric: Optional[str]
-    pin_count: Optional[int]
-    pitch: Optional[float]
+    package_type: str | None
+    size_imperial: str | None
+    size_metric: str | None
+    pin_count: int | None
+    pitch: float | None
     canonical: str
 
     def is_compatible(self, other: 'ParsedFootprint') -> bool:
@@ -255,7 +254,7 @@ def normalize_footprint(footprint_str: str) -> str:
     return parsed.canonical
 
 
-def get_equivalent_sizes(size: str) -> List[str]:
+def get_equivalent_sizes(size: str) -> list[str]:
     """Get equivalent imperial/metric sizes for a chip component.
 
     Args:
@@ -280,7 +279,7 @@ def get_equivalent_sizes(size: str) -> List[str]:
     return equivalents
 
 
-def extract_footprint(component_data: dict) -> Optional[ParsedFootprint]:
+def extract_footprint(component_data: dict) -> ParsedFootprint | None:
     """Extract and parse footprint from component data dictionary.
 
     Args:

@@ -1,23 +1,20 @@
 """
 Unit tests for KiCad utilities.
 """
-import pytest
 import os
-import json
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 from parts_mcp.utils.kicad_utils import (
-    find_kicad_projects,
-    get_project_files,
-    load_project_json,
     extract_project_info,
     find_kicad_cli,
-    run_kicad_cli,
-    get_kicad_version,
+    find_kicad_projects,
     generate_bom_from_schematic,
     generate_netlist,
-    validate_kicad_installation
+    get_kicad_version,
+    get_project_files,
+    load_project_json,
+    run_kicad_cli,
+    validate_kicad_installation,
 )
 
 

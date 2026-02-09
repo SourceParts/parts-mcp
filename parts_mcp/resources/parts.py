@@ -2,7 +2,8 @@
 Parts database resources for read-only access.
 """
 import logging
-from typing import Dict, Any, List
+from typing import Any
+
 from fastmcp import FastMCP
 
 logger = logging.getLogger(__name__)
@@ -10,13 +11,13 @@ logger = logging.getLogger(__name__)
 
 def register_parts_resources(mcp: FastMCP) -> None:
     """Register parts-related resources with the MCP server.
-    
+
     Args:
         mcp: The FastMCP server instance
     """
-    
+
     @mcp.resource("parts://categories")
-    async def list_part_categories() -> Dict[str, Any]:
+    async def list_part_categories() -> dict[str, Any]:
         """List available part categories."""
         categories = {
             "passive": ["Resistors", "Capacitors", "Inductors"],
@@ -26,15 +27,15 @@ def register_parts_resources(mcp: FastMCP) -> None:
             "sensors": ["Temperature", "Pressure", "Motion", "Light"],
             "display": ["LEDs", "LCDs", "OLEDs"],
         }
-        
+
         return {
             "categories": categories,
             "total_categories": len(categories),
             "description": "Electronic component categories for searching"
         }
-    
+
     @mcp.resource("parts://parameters")
-    async def list_search_parameters() -> Dict[str, Any]:
+    async def list_search_parameters() -> dict[str, Any]:
         """List available search parameters for parts."""
         parameters = {
             "electrical": [
@@ -55,7 +56,7 @@ def register_parts_resources(mcp: FastMCP) -> None:
                 "lifecycle_status", "minimum_quantity"
             ]
         }
-        
+
         return {
             "parameters": parameters,
             "description": "Searchable parameters for electronic components"

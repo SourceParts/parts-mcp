@@ -17,8 +17,8 @@ KICAD_SEARCH_PATHS: list[str] = []
 kicad_paths_env = os.getenv("KICAD_SEARCH_PATHS", "")
 if kicad_paths_env:
     KICAD_SEARCH_PATHS = [
-        Path(p.strip()).expanduser().resolve().as_posix() 
-        for p in kicad_paths_env.split(",") 
+        Path(p.strip()).expanduser().resolve().as_posix()
+        for p in kicad_paths_env.split(",")
         if p.strip()
     ]
 

@@ -1,14 +1,14 @@
 """
 KiCad-specific utility functions for parts-mcp.
 """
-import os
 import json
 import logging
-import subprocess
+import os
 import platform
 import shutil
+import subprocess
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Any
 
 from parts_mcp.config import KICAD_SEARCH_PATHS
 
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 # KiCad file extensions
 KICAD_EXTENSIONS = {
     "project": ".kicad_pro",
-    "pcb": ".kicad_pcb", 
+    "pcb": ".kicad_pcb",
     "schematic": ".kicad_sch",
     "design_rules": ".kicad_dru",
     "worksheet": ".kicad_wks",
@@ -35,27 +35,27 @@ DATA_EXTENSIONS = [
 ]
 
 
-def find_kicad_projects() -> List[Dict[str, Any]]:
+def find_kicad_projects() -> list[dict[str, Any]]:
     """Find KiCad projects in configured search paths.
-    
+
     Returns:
         List of dictionaries with project information
     """
     projects = []
     logger.info("Searching for KiCad projects...")
-    
+
     # Expand and validate search paths
     expanded_search_dirs = []
     for raw_dir in KICAD_SEARCH_PATHS:
         expanded_dir = Path(raw_dir).expanduser().resolve()
         if expanded_dir.exists() and expanded_dir not in expanded_search_dirs:
             expanded_search_dirs.append(expanded_dir)
-            
+
     logger.info(f"Searching in {len(expanded_search_dirs)} directories")
-    
+
     for search_dir in expanded_search_dirs:
         logger.debug(f"Scanning directory: {search_dir}")
-        
+
         # Find all .kicad_pro files
         try:
             for proj_file in search_dir.rglob("*.kicad_pro"):
@@ -63,7 +63,7 @@ def find_kicad_projects() -> List[Dict[str, Any]]:
                     # Get modification time
                     mod_time = proj_file.stat().st_mtime
                     rel_path = proj_file.relative_to(search_dir)
-                    
+
                     projects.append({
                         "name": proj_file.stem,
                         "path": str(proj_file),
@@ -71,48 +71,48 @@ def find_kicad_projects() -> List[Dict[str, Any]]:
                         "directory": str(proj_file.parent),
                         "modified": mod_time
                     })
-                    
+
                 except OSError as e:
                     logger.error(f"Error accessing project file {proj_file}: {e}")
-                    
+
         except Exception as e:
             logger.error(f"Error scanning directory {search_dir}: {e}")
-    
+
     logger.info(f"Found {len(projects)} KiCad projects")
     return projects
 
 
-def get_project_files(project_path: str) -> Dict[str, str]:
+def get_project_files(project_path: str) -> dict[str, str]:
     """Get all files related to a KiCad project.
-    
+
     Args:
         project_path: Path to the .kicad_pro file
-        
+
     Returns:
         Dictionary mapping file types to file paths
     """
     project_dir = Path(project_path).parent
     project_name = Path(project_path).stem
-    
+
     files = {}
-    
+
     # Check for standard KiCad files
     for file_type, extension in KICAD_EXTENSIONS.items():
         if file_type == "project":
             files[file_type] = project_path
             continue
-            
+
         file_path = project_dir / f"{project_name}{extension}"
         if file_path.exists():
             files[file_type] = str(file_path)
-    
+
     # Check for data files
     try:
         for file_path in project_dir.iterdir():
             if file_path.is_file() and file_path.suffix in DATA_EXTENSIONS:
                 # Determine file type from name
                 file_name = file_path.stem.lower()
-                
+
                 if "bom" in file_name:
                     file_type = "bom"
                 elif "pos" in file_name or "position" in file_name:
@@ -121,42 +121,42 @@ def get_project_files(project_path: str) -> Dict[str, str]:
                     file_type = "netlist_data"
                 else:
                     file_type = file_path.suffix[1:]  # Remove dot
-                    
+
                 # Add suffix to avoid key conflicts
                 if file_type in files:
                     file_type = f"{file_type}_{file_path.suffix[1:]}"
-                    
+
                 files[file_type] = str(file_path)
-                
+
     except (OSError, FileNotFoundError):
         pass
-        
+
     return files
 
 
-def load_project_json(project_path: str) -> Optional[Dict[str, Any]]:
+def load_project_json(project_path: str) -> dict[str, Any] | None:
     """Load and parse a KiCad project file.
-    
+
     Args:
         project_path: Path to the .kicad_pro file
-        
+
     Returns:
         Parsed JSON data or None if parsing failed
     """
     try:
-        with open(project_path, 'r', encoding='utf-8') as f:
+        with open(project_path, encoding='utf-8') as f:
             return json.load(f)
     except Exception as e:
         logger.error(f"Error loading project file {project_path}: {e}")
         return None
 
 
-def extract_project_info(project_path: str) -> Dict[str, Any]:
+def extract_project_info(project_path: str) -> dict[str, Any]:
     """Extract information from a KiCad project file.
-    
+
     Args:
         project_path: Path to the .kicad_pro file
-        
+
     Returns:
         Dictionary with project information
     """
@@ -168,14 +168,14 @@ def extract_project_info(project_path: str) -> Dict[str, Any]:
         "metadata": {},
         "settings": {}
     }
-    
+
     # Load project JSON
     project_data = load_project_json(project_path)
     if project_data:
         # Extract metadata
         if "meta" in project_data:
             info["metadata"] = project_data["meta"]
-            
+
         # Extract board settings
         if "board" in project_data:
             board = project_data["board"]
@@ -183,15 +183,15 @@ def extract_project_info(project_path: str) -> Dict[str, Any]:
                 "thickness": board.get("thickness"),
                 "copper_layers": board.get("copper_layer_count"),
             }
-            
+
         # Extract text variables
         if "text_variables" in project_data:
             info["text_variables"] = project_data["text_variables"]
-            
+
     return info
 
 
-def find_kicad_cli() -> Optional[str]:
+def find_kicad_cli() -> str | None:
     """Find the KiCad CLI executable.
 
     Searches in the following order:
@@ -264,13 +264,13 @@ def find_kicad_cli() -> Optional[str]:
     return None
 
 
-def run_kicad_cli(args: List[str], timeout: int = 30) -> Dict[str, Any]:
+def run_kicad_cli(args: list[str], timeout: int = 30) -> dict[str, Any]:
     """Run a KiCad CLI command.
-    
+
     Args:
         args: Command arguments (excluding 'kicad-cli')
         timeout: Command timeout in seconds
-        
+
     Returns:
         Dictionary with command results
     """
@@ -280,19 +280,19 @@ def run_kicad_cli(args: List[str], timeout: int = 30) -> Dict[str, Any]:
             "success": False,
             "error": "KiCad CLI not found. Please install KiCad."
         }
-    
+
     cmd = [cli_path] + args
-    
+
     try:
         logger.info(f"Running KiCad CLI: {' '.join(cmd)}")
-        
+
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
             timeout=timeout
         )
-        
+
         return {
             "success": result.returncode == 0,
             "stdout": result.stdout,
@@ -300,7 +300,7 @@ def run_kicad_cli(args: List[str], timeout: int = 30) -> Dict[str, Any]:
             "returncode": result.returncode,
             "command": ' '.join(cmd)
         }
-        
+
     except subprocess.TimeoutExpired:
         return {
             "success": False,
@@ -315,20 +315,20 @@ def run_kicad_cli(args: List[str], timeout: int = 30) -> Dict[str, Any]:
         }
 
 
-def open_kicad_project(project_path: str) -> Dict[str, Any]:
+def open_kicad_project(project_path: str) -> dict[str, Any]:
     """Open a KiCad project in the KiCad application.
-    
+
     Args:
         project_path: Path to the .kicad_pro file
-        
+
     Returns:
         Dictionary with result information
     """
     if not os.path.exists(project_path):
         return {"success": False, "error": f"Project not found: {project_path}"}
-    
+
     system = platform.system()
-    
+
     try:
         if system == "Darwin":  # macOS
             cmd = ["open", "-a", "KiCad", project_path]
@@ -343,21 +343,21 @@ def open_kicad_project(project_path: str) -> Dict[str, Any]:
             }
         else:  # Linux
             cmd = ["xdg-open", project_path]
-        
+
         result = subprocess.run(cmd, capture_output=True, text=True)
-        
+
         return {
             "success": result.returncode == 0,
             "command": ' '.join(cmd),
             "output": result.stdout,
             "error": result.stderr if result.returncode != 0 else None
         }
-        
+
     except Exception as e:
         return {"success": False, "error": str(e)}
 
 
-def get_kicad_version() -> Optional[Dict[str, Any]]:
+def get_kicad_version() -> dict[str, Any] | None:
     """Get KiCad CLI version information.
 
     Returns:
@@ -401,10 +401,10 @@ def get_kicad_version() -> Optional[Dict[str, Any]]:
 
 def generate_bom_from_schematic(
     schematic_path: str,
-    output_path: Optional[str] = None,
+    output_path: str | None = None,
     format: str = "csv",
-    fields: Optional[List[str]] = None
-) -> Dict[str, Any]:
+    fields: list[str] | None = None
+) -> dict[str, Any]:
     """Generate a BOM from a KiCad schematic using kicad-cli.
 
     Args:
@@ -493,9 +493,9 @@ def generate_bom_from_schematic(
 
 def generate_netlist(
     schematic_path: str,
-    output_path: Optional[str] = None,
+    output_path: str | None = None,
     format: str = "kicad"
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Generate a netlist from a KiCad schematic using kicad-cli.
 
     Args:
@@ -573,8 +573,8 @@ def generate_netlist(
 
 def export_schematic_pdf(
     schematic_path: str,
-    output_path: Optional[str] = None
-) -> Dict[str, Any]:
+    output_path: str | None = None
+) -> dict[str, Any]:
     """Export a schematic to PDF using kicad-cli.
 
     Args:
@@ -624,7 +624,7 @@ def export_schematic_pdf(
         return {"success": False, "error": str(e)}
 
 
-def validate_kicad_installation() -> Dict[str, Any]:
+def validate_kicad_installation() -> dict[str, Any]:
     """Validate KiCad installation and capabilities.
 
     Returns:

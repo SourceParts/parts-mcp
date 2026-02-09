@@ -16,14 +16,13 @@ Usage:
     # Local matching (fallback)
     result = match_component_local(component, candidates)
 """
-import re
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, List, Any, Optional, Tuple
 from difflib import SequenceMatcher
+from typing import Any
 
-from .value_parser import parse_value, values_match, ParsedValue
-from .footprint_matcher import parse_footprint, footprints_compatible, ParsedFootprint
+from .footprint_matcher import footprints_compatible, parse_footprint
+from .value_parser import parse_value, values_match
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +35,7 @@ USE_API_MATCHING = True
 # ============================================================================
 
 def match_component_via_api(
-    component: Dict[str, Any],
+    component: dict[str, Any],
     max_results: int = 5,
     search_depth: str = "standard"
 ) -> "MatchResult":
@@ -52,7 +51,7 @@ def match_component_via_api(
     Returns:
         MatchResult with best match and confidence score
     """
-    from .api_client import get_client, SourcePartsAPIError
+    from .api_client import SourcePartsAPIError, get_client
 
     try:
         client = get_client()
@@ -85,9 +84,9 @@ def match_component_via_api(
 
 
 def match_components_batch_via_api(
-    components: List[Dict[str, Any]],
+    components: list[dict[str, Any]],
     search_depth: str = "standard"
-) -> Tuple[List["MatchResult"], "MatchStatistics"]:
+) -> tuple[list["MatchResult"], "MatchStatistics"]:
     """Batch match components using the Source Parts API.
 
     This offloads batch matching and confidence scoring to the API.
@@ -99,7 +98,7 @@ def match_components_batch_via_api(
     Returns:
         Tuple of (match results, statistics)
     """
-    from .api_client import get_client, SourcePartsAPIError
+    from .api_client import SourcePartsAPIError, get_client
 
     try:
         client = get_client()
@@ -147,10 +146,10 @@ def match_components_batch_via_api(
 # ============================================================================
 
 def match_component(
-    bom_component: Dict[str, Any],
-    candidate_parts: Optional[List[Dict[str, Any]]] = None,
-    weights: Optional[Dict[str, float]] = None,
-    use_api: Optional[bool] = None
+    bom_component: dict[str, Any],
+    candidate_parts: list[dict[str, Any]] | None = None,
+    weights: dict[str, float] | None = None,
+    use_api: bool | None = None
 ) -> "MatchResult":
     """Match a BOM component to database parts.
 
@@ -197,11 +196,11 @@ def match_component(
 
 
 def match_components_batch(
-    bom_components: List[Dict[str, Any]],
+    bom_components: list[dict[str, Any]],
     search_func=None,
-    weights: Optional[Dict[str, float]] = None,
-    use_api: Optional[bool] = None
-) -> Tuple[List["MatchResult"], "MatchStatistics"]:
+    weights: dict[str, float] | None = None,
+    use_api: bool | None = None
+) -> tuple[list["MatchResult"], "MatchStatistics"]:
     """Match a batch of BOM components.
 
     By default, uses the API for batch matching. Falls back to local matching
@@ -274,11 +273,11 @@ MATCH_WEIGHTS = {
 @dataclass
 class MatchResult:
     """Result of matching a BOM component to a database part."""
-    bom_component: Dict[str, Any]
-    matched_part: Optional[Dict[str, Any]]
+    bom_component: dict[str, Any]
+    matched_part: dict[str, Any] | None
     confidence: float
-    match_details: Dict[str, float] = field(default_factory=dict)
-    warnings: List[str] = field(default_factory=list)
+    match_details: dict[str, float] = field(default_factory=dict)
+    warnings: list[str] = field(default_factory=list)
 
     @property
     def is_high_confidence(self) -> bool:
@@ -313,9 +312,9 @@ class MatchStatistics:
 
 
 def match_component_local(
-    bom_component: Dict[str, Any],
-    candidate_parts: List[Dict[str, Any]],
-    weights: Optional[Dict[str, float]] = None
+    bom_component: dict[str, Any],
+    candidate_parts: list[dict[str, Any]],
+    weights: dict[str, float] | None = None
 ) -> MatchResult:
     """Match a BOM component against a list of candidate parts (local matching).
 
@@ -394,10 +393,10 @@ def match_component_local(
 
 
 def match_components_batch_local(
-    bom_components: List[Dict[str, Any]],
+    bom_components: list[dict[str, Any]],
     search_func,
-    weights: Optional[Dict[str, float]] = None
-) -> Tuple[List[MatchResult], MatchStatistics]:
+    weights: dict[str, float] | None = None
+) -> tuple[list[MatchResult], MatchStatistics]:
     """Match a batch of BOM components using a local search function.
 
     Note: This is the local fallback. Prefer match_components_batch() which uses the API.
@@ -451,14 +450,14 @@ def match_components_batch_local(
 
 
 def _calculate_match_score(
-    bom_mpn: Optional[str],
-    bom_value: Optional[str],
-    bom_footprint: Optional[str],
-    bom_manufacturer: Optional[str],
-    bom_description: Optional[str],
-    candidate: Dict[str, Any],
-    weights: Dict[str, float]
-) -> Tuple[float, Dict[str, float]]:
+    bom_mpn: str | None,
+    bom_value: str | None,
+    bom_footprint: str | None,
+    bom_manufacturer: str | None,
+    bom_description: str | None,
+    candidate: dict[str, Any],
+    weights: dict[str, float]
+) -> tuple[float, dict[str, float]]:
     """Calculate match score between BOM component and candidate part."""
     details = {}
     total_weight = 0.0
@@ -541,51 +540,51 @@ def _string_similarity(s1: str, s2: str) -> float:
     return SequenceMatcher(None, s1, s2).ratio()
 
 
-def _get_mpn(component: Dict[str, Any]) -> Optional[str]:
+def _get_mpn(component: dict[str, Any]) -> str | None:
     """Extract MPN from component data."""
-    for field in ['mpn', 'MPN', 'Mpn', 'part_number', 'Part Number',
-                  'manufacturer_part_number', 'Manufacturer Part Number']:
-        if field in component and component[field]:
-            return str(component[field]).strip()
+    for key in ['mpn', 'MPN', 'Mpn', 'part_number', 'Part Number',
+                'manufacturer_part_number', 'Manufacturer Part Number']:
+        if key in component and component[key]:
+            return str(component[key]).strip()
     return None
 
 
-def _get_value(component: Dict[str, Any]) -> Optional[str]:
+def _get_value(component: dict[str, Any]) -> str | None:
     """Extract value from component data."""
-    for field in ['value', 'Value', 'VALUE', 'comment', 'Comment']:
-        if field in component and component[field]:
-            return str(component[field]).strip()
+    for key in ['value', 'Value', 'VALUE', 'comment', 'Comment']:
+        if key in component and component[key]:
+            return str(component[key]).strip()
     return None
 
 
-def _get_footprint(component: Dict[str, Any]) -> Optional[str]:
+def _get_footprint(component: dict[str, Any]) -> str | None:
     """Extract footprint from component data."""
-    for field in ['footprint', 'Footprint', 'FOOTPRINT',
-                  'package', 'Package', 'case', 'Case']:
-        if field in component and component[field]:
-            return str(component[field]).strip()
+    for key in ['footprint', 'Footprint', 'FOOTPRINT',
+                'package', 'Package', 'case', 'Case']:
+        if key in component and component[key]:
+            return str(component[key]).strip()
     return None
 
 
-def _get_manufacturer(component: Dict[str, Any]) -> Optional[str]:
+def _get_manufacturer(component: dict[str, Any]) -> str | None:
     """Extract manufacturer from component data."""
-    for field in ['manufacturer', 'Manufacturer', 'MANUFACTURER',
-                  'mfr', 'Mfr', 'mfg', 'Mfg']:
-        if field in component and component[field]:
-            return str(component[field]).strip()
+    for key in ['manufacturer', 'Manufacturer', 'MANUFACTURER',
+                'mfr', 'Mfr', 'mfg', 'Mfg']:
+        if key in component and component[key]:
+            return str(component[key]).strip()
     return None
 
 
-def _get_description(component: Dict[str, Any]) -> Optional[str]:
+def _get_description(component: dict[str, Any]) -> str | None:
     """Extract description from component data."""
-    for field in ['description', 'Description', 'DESCRIPTION',
-                  'desc', 'Desc']:
-        if field in component and component[field]:
-            return str(component[field]).strip()
+    for key in ['description', 'Description', 'DESCRIPTION',
+                'desc', 'Desc']:
+        if key in component and component[key]:
+            return str(component[key]).strip()
     return None
 
 
-def _build_search_query(component: Dict[str, Any]) -> Optional[str]:
+def _build_search_query(component: dict[str, Any]) -> str | None:
     """Build a search query from component data."""
     # Try MPN first (most specific)
     mpn = _get_mpn(component)
@@ -613,7 +612,7 @@ def _build_search_query(component: Dict[str, Any]) -> Optional[str]:
     return None
 
 
-def _calculate_statistics(results: List[MatchResult]) -> MatchStatistics:
+def _calculate_statistics(results: list[MatchResult]) -> MatchStatistics:
     """Calculate statistics from match results."""
     total = len(results)
     if total == 0:

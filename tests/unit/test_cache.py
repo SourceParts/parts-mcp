@@ -1,21 +1,18 @@
 """
 Unit tests for caching utilities.
 """
-import pytest
-import time
-from unittest.mock import patch
 
 from parts_mcp.utils.cache import (
-    make_cache_key,
-    cached,
-    cache_get,
-    cache_set,
     cache_delete,
-    clear_cache_prefix,
-    clear_all_cache,
-    get_cache_stats,
+    cache_get,
+    cache_part_details,
     cache_search_results,
-    cache_part_details
+    cache_set,
+    cached,
+    clear_all_cache,
+    clear_cache_prefix,
+    get_cache_stats,
+    make_cache_key,
 )
 
 

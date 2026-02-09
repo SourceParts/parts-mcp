@@ -4,11 +4,11 @@ Unit tests for component matching utilities.
 import pytest
 
 from parts_mcp.utils.component_matcher import (
-    match_component,
-    match_components_batch,
+    MATCH_WEIGHTS,
     MatchResult,
     MatchStatistics,
-    MATCH_WEIGHTS
+    match_component,
+    match_components_batch,
 )
 
 

@@ -1,17 +1,15 @@
 """
 Unit tests for BOM parsing utilities.
 """
-import pytest
 import json
-from pathlib import Path
 
 from parts_mcp.utils.bom_parser import (
-    parse_bom_file,
-    analyze_bom_data,
+    _extract_categories_from_refs,
     _parse_csv_bom,
     _parse_json_bom,
-    _extract_categories_from_refs,
-    export_bom_summary
+    analyze_bom_data,
+    export_bom_summary,
+    parse_bom_file,
 )
 
 

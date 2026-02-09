@@ -2,10 +2,11 @@
 Shared fixtures and configuration for parts-mcp tests.
 """
 import json
-import pytest
 from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock
-from typing import Dict, Any, List
+from typing import Any
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 # Test data directory
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -19,23 +20,23 @@ class MockAPIResponse:
     """Factory for creating mock API responses."""
 
     @staticmethod
-    def success(data: Dict[str, Any]) -> Dict[str, Any]:
+    def success(data: dict[str, Any]) -> dict[str, Any]:
         """Create a successful API response envelope."""
         return {"status": "success", "data": data}
 
     @staticmethod
-    def error(message: str, status_code: int = 400) -> Dict[str, Any]:
+    def error(message: str, status_code: int = 400) -> dict[str, Any]:
         """Create an error API response."""
         return {"status": "error", "error": message}
 
     @staticmethod
     def search_results(
-        parts: List[Dict[str, Any]],
+        parts: list[dict[str, Any]],
         total: int = None,
         query: str = "test",
         limit: int = 25,
         offset: int = 0
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Create a search results response."""
         return MockAPIResponse.success({
             "parts": parts,
@@ -51,7 +52,7 @@ class MockAPIResponse:
         manufacturer: str = "STMicroelectronics",
         category: str = "Microcontrollers",
         **kwargs
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Create a part details response."""
         part_data = {
             "part_number": part_number,
@@ -68,7 +69,7 @@ class MockAPIResponse:
         quantity: int = 100,
         minimum_quantity: int = 10,
         location: str = "Bin A-12"
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Create an inventory response."""
         return MockAPIResponse.success({
             "part_number": part_number,
@@ -80,8 +81,8 @@ class MockAPIResponse:
     @staticmethod
     def pricing(
         part_number: str = "STM32F407VGT6",
-        price_breaks: List[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+        price_breaks: list[dict[str, Any]] = None
+    ) -> dict[str, Any]:
         """Create a pricing response."""
         if price_breaks is None:
             price_breaks = [

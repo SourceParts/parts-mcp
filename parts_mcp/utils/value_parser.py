@@ -3,10 +3,9 @@ Value parsing utilities for electronic component values.
 
 Handles SI prefixes, resistor notation, and various value formats.
 """
-import re
 import logging
+import re
 from dataclasses import dataclass
-from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -57,10 +56,10 @@ UNIT_SUFFIXES = {
 class ParsedValue:
     """Represents a parsed component value."""
     original: str
-    numeric_value: Optional[float]
-    unit: Optional[str]
-    prefix: Optional[str]
-    tolerance: Optional[float]
+    numeric_value: float | None
+    unit: str | None
+    prefix: str | None
+    tolerance: float | None
     formatted: str
 
     def __eq__(self, other):
@@ -210,7 +209,7 @@ def parse_value(value_str: str) -> ParsedValue:
     )
 
 
-def _format_value(numeric_value: float, unit: Optional[str], prefix: Optional[str]) -> str:
+def _format_value(numeric_value: float, unit: str | None, prefix: str | None) -> str:
     """Format a numeric value with appropriate prefix and unit."""
     if numeric_value == 0:
         return "0"
@@ -270,7 +269,7 @@ def _format_value(numeric_value: float, unit: Optional[str], prefix: Optional[st
     return f"{formatted_number}{display_prefix}{unit_symbol}"
 
 
-def normalize_value(value_str: str) -> Tuple[Optional[float], str]:
+def normalize_value(value_str: str) -> tuple[float | None, str]:
     """Normalize a value string to a standard form for comparison.
 
     Args:
@@ -300,7 +299,7 @@ def values_match(value1: str, value2: str, tolerance_pct: float = 5.0) -> bool:
     return parsed1.is_compatible(parsed2, tolerance_pct)
 
 
-def extract_component_value(component_data: dict) -> Optional[ParsedValue]:
+def extract_component_value(component_data: dict) -> ParsedValue | None:
     """Extract and parse the value from a component data dictionary.
 
     Looks for common field names like 'value', 'Value', 'comment', etc.

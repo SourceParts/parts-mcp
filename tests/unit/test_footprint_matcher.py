@@ -1,14 +1,12 @@
 """
 Unit tests for footprint matching utilities.
 """
-import pytest
 
 from parts_mcp.utils.footprint_matcher import (
-    parse_footprint,
     footprints_compatible,
-    normalize_footprint,
     get_equivalent_sizes,
-    ParsedFootprint
+    normalize_footprint,
+    parse_footprint,
 )
 
 

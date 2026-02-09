@@ -2,6 +2,7 @@
 Prompt templates for common parts sourcing workflows.
 """
 import logging
+
 from fastmcp import FastMCP
 
 logger = logging.getLogger(__name__)
@@ -9,11 +10,10 @@ logger = logging.getLogger(__name__)
 
 def register_prompts(mcp: FastMCP) -> None:
     """Register prompt templates with the MCP server.
-    
+
     Args:
         mcp: The FastMCP server instance
     """
-    
     @mcp.prompt()
     async def find_resistor() -> str:
         """Help finding the right resistor."""
@@ -29,7 +29,7 @@ Please search for suitable resistors and compare prices across suppliers."""
     @mcp.prompt()
     async def source_bom() -> str:
         """Help sourcing a complete bill of materials."""
-        return """I need help sourcing components for my project. 
+        return """I need help sourcing components for my project.
 
 Please help me:
 1. Extract the BOM from my KiCad project at: [project path]

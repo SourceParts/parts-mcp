@@ -3,17 +3,18 @@ Source Parts API client for electronic component searching.
 """
 import logging
 import time
-from typing import Dict, List, Any, Optional
-from urllib.parse import urljoin, urlencode
+from typing import Any
+from urllib.parse import urljoin
+
 import httpx
 from httpx import HTTPStatusError, RequestError, TimeoutException
 
 from parts_mcp.config import (
+    DEFAULT_PAGE_SIZE,
+    MAX_RESULTS,
+    SEARCH_TIMEOUT,
     SOURCE_PARTS_API_KEY,
     SOURCE_PARTS_API_URL,
-    SEARCH_TIMEOUT,
-    DEFAULT_PAGE_SIZE,
-    MAX_RESULTS
 )
 
 logger = logging.getLogger(__name__)
@@ -36,20 +37,20 @@ class SourcePartsRateLimitError(SourcePartsAPIError):
 
 class SourcePartsClient:
     """Client for interacting with Source Parts API."""
-    
-    def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None):
+
+    def __init__(self, api_key: str | None = None, base_url: str | None = None):
         """Initialize the Source Parts API client.
-        
+
         Args:
             api_key: API key for authentication (uses config if not provided)
             base_url: Base URL for API (uses config if not provided)
         """
         self.api_key = api_key or SOURCE_PARTS_API_KEY
         self.base_url = base_url or SOURCE_PARTS_API_URL
-        
+
         if not self.api_key:
             raise SourcePartsAuthError("No API key provided. Set SOURCE_PARTS_API_KEY in .env")
-            
+
         # Initialize HTTP client
         self.client = httpx.Client(
             timeout=SEARCH_TIMEOUT,
@@ -59,62 +60,62 @@ class SourcePartsClient:
                 "User-Agent": "parts-mcp/1.0"
             }
         )
-        
+
         # Rate limiting
         self._last_request_time = 0
         self._min_request_interval = 0.1  # 100ms between requests
-        
+
     def __enter__(self):
         return self
-        
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
-        
+
     def close(self):
         """Close the HTTP client."""
         self.client.close()
-        
+
     def _rate_limit(self):
         """Implement rate limiting between requests."""
         current_time = time.time()
         time_since_last = current_time - self._last_request_time
-        
+
         if time_since_last < self._min_request_interval:
             sleep_time = self._min_request_interval - time_since_last
             time.sleep(sleep_time)
-            
+
         self._last_request_time = time.time()
-        
+
     def _make_request(
         self,
         method: str,
         endpoint: str,
-        params: Optional[Dict[str, Any]] = None,
-        json_data: Optional[Dict[str, Any]] = None,
+        params: dict[str, Any] | None = None,
+        json_data: dict[str, Any] | None = None,
         retry_count: int = 3
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Make an API request with error handling and retries.
-        
+
         Args:
             method: HTTP method (GET, POST, etc.)
             endpoint: API endpoint path
             params: Query parameters
             json_data: JSON body data
             retry_count: Number of retries on failure
-            
+
         Returns:
             API response data
-            
+
         Raises:
             SourcePartsAPIError: On API errors
         """
         url = urljoin(self.base_url, endpoint.lstrip('/'))
-        
+
         for attempt in range(retry_count):
             try:
                 # Rate limiting
                 self._rate_limit()
-                
+
                 # Make request
                 response = self.client.request(
                     method=method,
@@ -122,7 +123,7 @@ class SourcePartsClient:
                     params=params,
                     json=json_data
                 )
-                
+
                 # Check for rate limiting
                 if response.status_code == 429:
                     retry_after = int(response.headers.get('Retry-After', 60))
@@ -131,16 +132,16 @@ class SourcePartsClient:
                         time.sleep(retry_after)
                         continue
                     raise SourcePartsRateLimitError(f"Rate limit exceeded, retry after {retry_after}s")
-                
+
                 # Check for auth errors
                 if response.status_code == 401:
                     raise SourcePartsAuthError("Invalid API key")
                 elif response.status_code == 403:
                     raise SourcePartsAuthError("Access forbidden - check API permissions")
-                
+
                 # Raise for other HTTP errors
                 response.raise_for_status()
-                
+
                 # Parse JSON response
                 raw_response = response.json()
 
@@ -154,39 +155,39 @@ class SourcePartsClient:
 
                 return raw_response
 
-            except TimeoutException:
+            except TimeoutException as e:
                 if attempt < retry_count - 1:
                     logger.warning(f"Request timeout, retry {attempt + 1}/{retry_count}")
                     time.sleep(2 ** attempt)  # Exponential backoff
                     continue
-                raise SourcePartsAPIError("Request timeout")
-                
+                raise SourcePartsAPIError("Request timeout") from e
+
             except RequestError as e:
                 if attempt < retry_count - 1:
                     logger.warning(f"Request error: {e}, retry {attempt + 1}/{retry_count}")
                     time.sleep(2 ** attempt)
                     continue
-                raise SourcePartsAPIError(f"Request error: {e}")
-                
+                raise SourcePartsAPIError(f"Request error: {e}") from e
+
             except HTTPStatusError as e:
                 error_detail = ""
                 try:
                     error_data = e.response.json()
                     error_detail = error_data.get('message', error_data.get('error', ''))
-                except:
+                except Exception:
                     error_detail = e.response.text
-                    
+
                 raise SourcePartsAPIError(
                     f"API error {e.response.status_code}: {error_detail or e}"
-                )
-                
+                ) from e
+
     def search_parts(
         self,
         query: str,
-        filters: Optional[Dict[str, Any]] = None,
+        filters: dict[str, Any] | None = None,
         limit: int = DEFAULT_PAGE_SIZE,
         offset: int = 0
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Search for electronic parts.
 
         Args:
@@ -229,8 +230,8 @@ class SourcePartsClient:
         except Exception as e:
             logger.error(f"Search failed: {e}")
             raise
-            
-    def get_part_details(self, sku: str) -> Dict[str, Any]:
+
+    def get_part_details(self, sku: str) -> dict[str, Any]:
         """Get detailed information about a specific part.
 
         Args:
@@ -246,20 +247,20 @@ class SourcePartsClient:
         except Exception as e:
             logger.error(f"Failed to get part details: {e}")
             raise
-            
+
     def get_part_pricing(
         self,
         part_id: str,
         quantity: int = 1,
         currency: str = 'USD'
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Get pricing information for a part.
-        
+
         Args:
             part_id: Part identifier
             quantity: Quantity for pricing
             currency: Currency code
-            
+
         Returns:
             Pricing information from suppliers
         """
@@ -267,16 +268,16 @@ class SourcePartsClient:
             'quantity': quantity,
             'currency': currency
         }
-        
+
         logger.info(f"Getting pricing for part {part_id}, qty={quantity}")
-        
+
         try:
             return self._make_request('GET', f'/parts/{part_id}/pricing', params=params)
         except Exception as e:
             logger.error(f"Failed to get pricing: {e}")
             raise
-            
-    def get_part_inventory(self, sku: str) -> Dict[str, Any]:
+
+    def get_part_inventory(self, sku: str) -> dict[str, Any]:
         """Get inventory information for a part.
 
         Args:
@@ -293,7 +294,7 @@ class SourcePartsClient:
             logger.error(f"Failed to get inventory: {e}")
             raise
 
-    def get_part_availability(self, sku: str) -> Dict[str, Any]:
+    def get_part_availability(self, sku: str) -> dict[str, Any]:
         """Get availability information for a part (alias for get_part_inventory).
 
         Args:
@@ -303,14 +304,14 @@ class SourcePartsClient:
             Inventory/availability data
         """
         return self.get_part_inventory(sku)
-            
+
     def search_by_parameters(
         self,
         category: str,
-        parameters: Dict[str, Any],
+        parameters: dict[str, Any],
         limit: int = DEFAULT_PAGE_SIZE,
         offset: int = 0
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Search parts by parametric specifications.
 
         Args:
@@ -334,12 +335,12 @@ class SourcePartsClient:
         query = f"category:{category} " + " ".join(query_parts)
 
         return self.search_parts(query, limit=limit, offset=offset)
-        
+
     def find_alternatives(
         self,
         part_number: str,
-        match_parameters: Optional[List[str]] = None
-    ) -> Dict[str, Any]:
+        match_parameters: list[str] | None = None
+    ) -> dict[str, Any]:
         """Find alternative parts for a given part number.
 
         Uses a search-based approach since the v1 API doesn't have a dedicated
@@ -382,7 +383,7 @@ class SourcePartsClient:
                 search_terms.append(category)
 
             # Use manufacturer for cross-reference
-            manufacturer = original_part.get('manufacturer')
+            original_part.get('manufacturer')
 
             # Use key parameters if specified
             if match_parameters:
@@ -415,8 +416,8 @@ class SourcePartsClient:
         except Exception as e:
             logger.error(f"Failed to find alternatives: {e}")
             raise
-            
-    def batch_search(self, part_numbers: List[str]) -> Dict[str, Any]:
+
+    def batch_search(self, part_numbers: list[str]) -> dict[str, Any]:
         """Search for multiple parts.
 
         The v1 API doesn't have a batch endpoint, so this performs sequential
@@ -468,10 +469,10 @@ class SourcePartsClient:
 
     def match_component(
         self,
-        component: Dict[str, Any],
+        component: dict[str, Any],
         max_results: int = 5,
         search_depth: str = "standard"
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Match a single BOM component to database parts with confidence scoring.
 
         This offloads matching logic to the API instead of doing it locally.
@@ -500,9 +501,9 @@ class SourcePartsClient:
 
     def match_components_batch(
         self,
-        components: List[Dict[str, Any]],
+        components: list[dict[str, Any]],
         search_depth: str = "standard"
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Batch match BOM components to database parts with confidence scoring.
 
         This offloads batch matching logic to the API instead of doing it locally.
@@ -538,7 +539,7 @@ class SourcePartsClient:
         sku: str,
         match_parameters: bool = True,
         max_results: int = 10
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Find alternative/substitute parts for a given SKU.
 
         Uses the v1 API alternatives endpoint which provides compatibility levels:
@@ -567,7 +568,7 @@ class SourcePartsClient:
             logger.error(f"Failed to get alternatives: {e}")
             raise
 
-    def get_footprint_compatible(self, footprint: str) -> Dict[str, Any]:
+    def get_footprint_compatible(self, footprint: str) -> dict[str, Any]:
         """Get compatible footprint sizes for a given footprint.
 
         Returns imperial/metric equivalences and compatible sizes.
@@ -587,7 +588,7 @@ class SourcePartsClient:
             logger.error(f"Failed to get compatible footprints: {e}")
             raise
 
-    def normalize_value(self, value: str) -> Dict[str, Any]:
+    def normalize_value(self, value: str) -> dict[str, Any]:
         """Normalize a component value string.
 
         Converts values like "4k7", "10n", "100u" to normalized form.
@@ -610,27 +611,27 @@ class SourcePartsClient:
 
 
 # Singleton instance for reuse
-_client_instance: Optional[SourcePartsClient] = None
+_client_instance: SourcePartsClient | None = None
 
 
 def get_client() -> SourcePartsClient:
     """Get or create a singleton Source Parts API client.
-    
+
     Returns:
         Source Parts API client instance
     """
     global _client_instance
-    
+
     if _client_instance is None:
         _client_instance = SourcePartsClient()
-        
+
     return _client_instance
 
 
 def close_client():
     """Close the singleton client instance."""
     global _client_instance
-    
+
     if _client_instance:
         _client_instance.close()
         _client_instance = None

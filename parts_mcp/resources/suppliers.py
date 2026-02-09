@@ -2,7 +2,8 @@
 Supplier information resources.
 """
 import logging
-from typing import Dict, Any, List
+from typing import Any
+
 from fastmcp import FastMCP
 
 logger = logging.getLogger(__name__)
@@ -10,13 +11,13 @@ logger = logging.getLogger(__name__)
 
 def register_supplier_resources(mcp: FastMCP) -> None:
     """Register supplier-related resources with the MCP server.
-    
+
     Args:
         mcp: The FastMCP server instance
     """
-    
+
     @mcp.resource("suppliers://list")
-    async def list_suppliers() -> Dict[str, Any]:
+    async def list_suppliers() -> dict[str, Any]:
         """List available electronic component suppliers through Source Parts API."""
         return {
             "api": "Source Parts API",
@@ -37,9 +38,9 @@ def register_supplier_resources(mcp: FastMCP) -> None:
                 "And many more..."
             ]
         }
-    
+
     @mcp.resource("suppliers://capabilities")
-    async def supplier_capabilities() -> Dict[str, Any]:
+    async def supplier_capabilities() -> dict[str, Any]:
         """Get capabilities provided by Source Parts API."""
         return {
             "search_features": {
