@@ -3,7 +3,6 @@ Configuration management for Parts MCP server.
 """
 import os
 from pathlib import Path
-from typing import List, Optional
 
 # API Configuration
 SOURCE_PARTS_API_KEY = os.getenv("SOURCE_PARTS_API_KEY", "")
@@ -14,7 +13,7 @@ CACHE_DIR = Path(os.getenv("PARTS_CACHE_DIR", "~/.cache/parts-mcp")).expanduser(
 CACHE_EXPIRY_HOURS = int(os.getenv("CACHE_EXPIRY_HOURS", "24"))
 
 # KiCad Configuration
-KICAD_SEARCH_PATHS: List[str] = []
+KICAD_SEARCH_PATHS: list[str] = []
 kicad_paths_env = os.getenv("KICAD_SEARCH_PATHS", "")
 if kicad_paths_env:
     KICAD_SEARCH_PATHS = [
