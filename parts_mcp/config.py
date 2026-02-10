@@ -6,7 +6,7 @@ from pathlib import Path
 
 # API Configuration
 SOURCE_PARTS_API_KEY = os.getenv("SOURCE_PARTS_API_KEY", "")
-SOURCE_PARTS_API_URL = os.getenv("SOURCE_PARTS_API_URL", "https://api.source.parts/v1")
+SOURCE_PARTS_API_URL = os.getenv("SOURCE_PARTS_API_URL", "https://api.source.parts/v1/")
 
 # Cache Configuration
 CACHE_DIR = Path(os.getenv("PARTS_CACHE_DIR", "~/.cache/parts-mcp")).expanduser()

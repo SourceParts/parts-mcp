@@ -50,8 +50,8 @@ def register_search_tools(mcp: FastMCP) -> None:
             results = client.search_parts(
                 query=query,
                 filters=search_filters,
-                page=1,
-                page_size=limit
+                limit=limit,
+                offset=0
             )
 
             # Format results
@@ -77,9 +77,28 @@ def register_search_tools(mcp: FastMCP) -> None:
 
         except SourcePartsAPIError as e:
             logger.error(f"API error during search: {e}")
+            error_str = str(e)
+
+            # Provide user-friendly messages for common errors
+            if "404" in error_str:
+                return {
+                    "query": query,
+                    "error": "Parts search endpoint not found.",
+                    "message": "This may indicate a configuration issue. Please contact support.",
+                    "success": False
+                }
+
+            if "503" in error_str or "unavailable" in error_str.lower():
+                return {
+                    "query": query,
+                    "error": "Search service temporarily unavailable.",
+                    "message": "The service is experiencing high load or maintenance. Please try again in a few minutes.",
+                    "success": False
+                }
+
             return {
                 "query": query,
-                "error": f"Search failed: {str(e)}",
+                "error": f"Search failed: {error_str}",
                 "success": False
             }
 
@@ -115,8 +134,8 @@ def register_search_tools(mcp: FastMCP) -> None:
             results = client.search_by_parameters(
                 category=category,
                 parameters=parameters,
-                page=1,
-                page_size=limit
+                limit=limit,
+                offset=0
             )
 
             return {
@@ -129,10 +148,21 @@ def register_search_tools(mcp: FastMCP) -> None:
 
         except SourcePartsAPIError as e:
             logger.error(f"Parametric search error: {e}")
+            error_str = str(e)
+
+            if "404" in error_str:
+                return {
+                    "category": category,
+                    "parameters": parameters,
+                    "error": "Parametric search endpoint not found.",
+                    "message": "This may indicate a configuration issue. Please contact support.",
+                    "success": False
+                }
+
             return {
                 "category": category,
                 "parameters": parameters,
-                "error": f"Search failed: {str(e)}",
+                "error": f"Search failed: {error_str}",
                 "success": False
             }
 
@@ -159,7 +189,7 @@ def register_search_tools(mcp: FastMCP) -> None:
             if manufacturer:
                 search_query = f"{manufacturer} {part_number}"
 
-            search_results = client.search_parts(search_query, page_size=1)
+            search_results = client.search_parts(search_query, limit=1)
 
             if not search_results.get('results'):
                 return {
@@ -194,9 +224,20 @@ def register_search_tools(mcp: FastMCP) -> None:
 
         except SourcePartsAPIError as e:
             logger.error(f"Error getting part details: {e}")
+            error_str = str(e)
+
+            if "404" in error_str:
+                return {
+                    "part_number": part_number,
+                    "manufacturer": manufacturer,
+                    "error": "Part details endpoint not found.",
+                    "message": "This may indicate a configuration issue. Please contact support.",
+                    "success": False
+                }
+
             return {
                 "part_number": part_number,
                 "manufacturer": manufacturer,
-                "error": f"Failed to get details: {str(e)}",
+                "error": f"Failed to get details: {error_str}",
                 "success": False
             }

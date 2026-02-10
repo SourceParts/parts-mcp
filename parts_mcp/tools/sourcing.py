@@ -40,7 +40,7 @@ def register_sourcing_tools(mcp: FastMCP) -> None:
             client = get_client()
 
             # Search for the part first
-            search_results = client.search_parts(part_number, page_size=1)
+            search_results = client.search_parts(part_number, limit=1)
 
             if not search_results.get('results'):
                 return {
@@ -146,7 +146,7 @@ def register_sourcing_tools(mcp: FastMCP) -> None:
                 if part_number in parts_data:
                     part_data = parts_data[part_number]
                 else:
-                    search_results = client.search_parts(part_number, page_size=1)
+                    search_results = client.search_parts(part_number, limit=1)
                     if search_results.get('results'):
                         part_data = search_results['results'][0]
                     else:

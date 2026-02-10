@@ -15,6 +15,9 @@ from parts_mcp.utils.kicad_utils import (
     get_project_files,
     run_kicad_cli,
 )
+from parts_mcp.utils.kicad_utils import (
+    find_kicad_projects as find_projects_util,
+)
 from parts_mcp.utils.kicad_utils import open_kicad_project as open_project_util
 from parts_mcp.utils.netlist_parser import (
     NetlistParser,
@@ -120,7 +123,7 @@ def register_kicad_tools(mcp: FastMCP) -> None:
         Returns:
             List of found KiCad projects
         """
-        projects = find_kicad_projects()
+        projects = find_projects_util()
 
         # Sort by modification time (newest first)
         projects.sort(key=lambda x: x.get('modified', 0), reverse=True)

@@ -57,7 +57,7 @@ class SourcePartsClient:
             headers={
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
-                "User-Agent": "parts-mcp/1.0"
+                "User-Agent": "PARTS-MCP/1.0"
             }
         )
 
@@ -109,7 +109,9 @@ class SourcePartsClient:
         Raises:
             SourcePartsAPIError: On API errors
         """
-        url = urljoin(self.base_url, endpoint.lstrip('/'))
+        # Ensure base_url ends with / for proper urljoin behavior
+        base = self.base_url if self.base_url.endswith('/') else self.base_url + '/'
+        url = urljoin(base, endpoint.lstrip('/'))
 
         for attempt in range(retry_count):
             try:
