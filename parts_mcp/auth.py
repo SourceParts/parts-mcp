@@ -505,6 +505,11 @@ class SourcePartsOIDCProxy(OIDCProxy):
     async def load_access_token(self, token: str):
         """Override to add step-by-step debug logging for token validation."""
         try:
+            # Step 0: Log token info
+            segments = token.split(".") if token else []
+            logger.info("load_access_token: token len=%d segments=%d preview=%s",
+                        len(token), len(segments), token[:40] if token else "(empty)")
+
             # Step 1: Verify our RS256 JWT
             logger.info("load_access_token: Step 1 - verifying RS256 JWT")
             payload = self.jwt_issuer.verify_token(token)
