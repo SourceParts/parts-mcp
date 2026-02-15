@@ -160,13 +160,160 @@ def load_rsa_private_key(env_value: str) -> bytes:
     return base64.b64decode(env_value)
 
 
+def _create_consent_html(
+    client_id: str,
+    redirect_uri: str,
+    scopes: list[str],
+    txn_id: str,
+    csrf_token: str,
+    client_name: str | None = None,
+    server_name: str | None = None,
+    server_icon_url: str | None = None,
+    server_website_url: str | None = None,
+    client_website_url: str | None = None,
+    csp_policy: str | None = None,
+) -> str:
+    """Create consent HTML with Source Parts branding instead of FastMCP."""
+    import html as html_module
+    from urllib.parse import urlparse
+
+    from fastmcp.server.auth.oauth_proxy import (
+        BUTTON_STYLES,
+        DETAILS_STYLES,
+        DETAIL_BOX_STYLES,
+        INFO_BOX_STYLES,
+        REDIRECT_SECTION_STYLES,
+        TOOLTIP_STYLES,
+        create_logo,
+        create_page,
+    )
+
+    client_display = html_module.escape(client_name or client_id)
+    server_name_escaped = html_module.escape(server_name or "Source Parts")
+
+    if server_website_url:
+        website_url_escaped = html_module.escape(server_website_url)
+        server_display = f'<a href="{website_url_escaped}" target="_blank" rel="noopener noreferrer" class="server-name-link">{server_name_escaped}</a>'
+    else:
+        server_display = server_name_escaped
+
+    intro_box = f"""
+        <div class="info-box">
+            <p>The application <strong>{client_display}</strong> wants to access the MCP server <strong>{server_display}</strong>. Please ensure you recognize the callback address below.</p>
+        </div>
+    """
+
+    redirect_uri_escaped = html_module.escape(redirect_uri)
+    redirect_section = f"""
+        <div class="redirect-section">
+            <span class="label">Credentials will be sent to:</span>
+            <div class="value">{redirect_uri_escaped}</div>
+        </div>
+    """
+
+    detail_rows = [
+        ("Application Name", html_module.escape(client_name or client_id)),
+        ("Application Website", html_module.escape(client_website_url or "N/A")),
+        ("Application ID", client_id),
+        ("Redirect URI", redirect_uri_escaped),
+        (
+            "Requested Scopes",
+            ", ".join(html_module.escape(s) for s in scopes) if scopes else "None",
+        ),
+    ]
+
+    detail_rows_html = "\n".join(
+        f"""
+        <div class="detail-row">
+            <div class="detail-label">{label}:</div>
+            <div class="detail-value">{value}</div>
+        </div>
+        """
+        for label, value in detail_rows
+    )
+
+    advanced_details = f"""
+        <details>
+            <summary>Advanced Details</summary>
+            <div class="detail-box">
+                {detail_rows_html}
+            </div>
+        </details>
+    """
+
+    form = f"""
+        <form id="consentForm" method="POST" action="">
+            <input type="hidden" name="txn_id" value="{txn_id}" />
+            <input type="hidden" name="csrf_token" value="{csrf_token}" />
+            <input type="hidden" name="submit" value="true" />
+            <div class="button-group">
+                <button type="submit" name="action" value="approve" class="btn-approve">Allow Access</button>
+                <button type="submit" name="action" value="deny" class="btn-deny">Deny</button>
+            </div>
+        </form>
+    """
+
+    help_link = """
+        <div class="help-link-container">
+            <span class="help-link">
+                Why am I seeing this?
+                <span class="tooltip">
+                    This server requires your consent before allowing a new
+                    application to connect. This protects you from unauthorized
+                    access where a malicious application could impersonate you.<br><br>
+                    If you did not initiate this request, click Deny and close
+                    this window.
+                </span>
+            </span>
+        </div>
+    """
+
+    content = f"""
+        <div class="container">
+            {create_logo(icon_url=server_icon_url, alt_text=server_name or "Source Parts")}
+            <h1>Application Access Request</h1>
+            {intro_box}
+            {redirect_section}
+            {advanced_details}
+            {form}
+        </div>
+        {help_link}
+    """
+
+    additional_styles = (
+        INFO_BOX_STYLES
+        + REDIRECT_SECTION_STYLES
+        + DETAILS_STYLES
+        + DETAIL_BOX_STYLES
+        + BUTTON_STYLES
+        + TOOLTIP_STYLES
+    )
+
+    if csp_policy is None:
+        parsed_redirect = urlparse(redirect_uri)
+        redirect_scheme = parsed_redirect.scheme.lower()
+        form_action_schemes = ["https:", "http:"]
+        if redirect_scheme and redirect_scheme not in ("http", "https"):
+            form_action_schemes.append(f"{redirect_scheme}:")
+        form_action_directive = " ".join(form_action_schemes)
+        csp_policy = f"default-src 'none'; style-src 'unsafe-inline'; img-src https: data:; base-uri 'none'; form-action {form_action_directive}"
+
+    return create_page(
+        content=content,
+        title="Application Access Request",
+        additional_styles=additional_styles,
+        csp_policy=csp_policy,
+    )
+
+
 class SourcePartsOIDCProxy(OIDCProxy):
     """OIDCProxy subclass that uses RS256 JWT signing and passes valid_scopes.
 
-    Fixes two issues with the base OIDCProxy:
+    Fixes three issues with the base OIDCProxy:
     1. OIDCProxy.__init__ does not pass valid_scopes to OAuthProxy, so DCR
        registrations with custom scopes (like "claudeai") may be rejected.
     2. FastMCP's JWTIssuer uses HS256, but Claude.ai needs RS256 + JWKS.
+    3. OAuth metadata is missing jwks_uri, which Claude.ai needs.
     """
 
     def __init__(
@@ -202,3 +349,130 @@ class SourcePartsOIDCProxy(OIDCProxy):
         logger.info(
             "Configured RS256 OAuth proxy for resource URL: %s", self._resource_url
         )
+
+    def get_routes(self, mcp_path: str | None = None):
+        """Override to inject jwks_uri into the OAuth metadata route."""
+        from starlette.requests import Request
+        from starlette.responses import JSONResponse
+        from starlette.routing import Route
+
+        routes = super().get_routes(mcp_path)
+        jwks_uri = str(self.base_url).rstrip("/") + "/.well-known/jwks.json"
+
+        patched = []
+        for route in routes:
+            if (
+                isinstance(route, Route)
+                and route.path == "/.well-known/oauth-authorization-server"
+            ):
+                # Wrap the original handler to inject jwks_uri
+                original_handler = route.endpoint
+
+                async def metadata_with_jwks(request: Request, _handler=original_handler) -> JSONResponse:
+                    response = await _handler(request)
+                    body = response.body
+                    import json as json_module
+                    data = json_module.loads(body)
+                    data["jwks_uri"] = jwks_uri
+                    return JSONResponse(
+                        content=data,
+                        headers=dict(response.headers),
+                    )
+
+                patched.append(Route(
+                    path="/.well-known/oauth-authorization-server",
+                    endpoint=metadata_with_jwks,
+                    methods=route.methods,
+                ))
+            else:
+                patched.append(route)
+        return patched
+
+    async def _show_consent_page(self, request):
+        """Override to use Source Parts branded consent page."""
+        import secrets as secrets_module
+
+        from fastmcp.server.server import FastMCP
+        from fastmcp.utilities.ui import create_secure_html_response
+
+        txn_id = request.query_params.get("txn_id")
+        if not txn_id:
+            return create_secure_html_response(
+                "<h1>Error</h1><p>Invalid or expired transaction</p>", status_code=400
+            )
+
+        txn_model = await self._transaction_store.get(key=txn_id)
+        if not txn_model:
+            return create_secure_html_response(
+                "<h1>Error</h1><p>Invalid or expired transaction</p>", status_code=400
+            )
+
+        txn = txn_model.model_dump()
+        client_key = self._make_client_key(txn["client_id"], txn["client_redirect_uri"])
+
+        approved = set(self._decode_list_cookie(request, "MCP_APPROVED_CLIENTS"))
+        denied = set(self._decode_list_cookie(request, "MCP_DENIED_CLIENTS"))
+
+        if client_key in approved:
+            from starlette.responses import RedirectResponse
+            upstream_url = self._build_upstream_authorize_url(txn_id, txn)
+            return RedirectResponse(url=upstream_url, status_code=302)
+
+        if client_key in denied:
+            from starlette.responses import RedirectResponse
+            from urllib.parse import urlencode
+            callback_params = {
+                "error": "access_denied",
+                "state": txn.get("client_state") or "",
+            }
+            sep = "&" if "?" in txn["client_redirect_uri"] else "?"
+            return RedirectResponse(
+                url=f"{txn['client_redirect_uri']}{sep}{urlencode(callback_params)}",
+                status_code=302,
+            )
+
+        # Need consent: issue CSRF token and show HTML
+        csrf_token = secrets_module.token_urlsafe(32)
+        csrf_expires_at = time.time() + 15 * 60
+
+        txn_model.csrf_token = csrf_token
+        txn_model.csrf_expires_at = csrf_expires_at
+        await self._transaction_store.put(key=txn_id, value=txn_model, ttl=15 * 60)
+
+        txn["csrf_token"] = csrf_token
+        txn["csrf_expires_at"] = csrf_expires_at
+
+        client = await self.get_client(txn["client_id"])
+        client_name = getattr(client, "client_name", None) if client else None
+
+        fastmcp = getattr(request.app.state, "fastmcp_server", None)
+        if isinstance(fastmcp, FastMCP):
+            server_name = fastmcp.name
+            icons = fastmcp.icons
+            server_icon_url = icons[0].src if icons else None
+            server_website_url = fastmcp.website_url
+        else:
+            server_name = None
+            server_icon_url = None
+            server_website_url = None
+
+        html = _create_consent_html(
+            client_id=txn["client_id"],
+            redirect_uri=txn["client_redirect_uri"],
+            scopes=txn.get("scopes") or [],
+            txn_id=txn_id,
+            csrf_token=csrf_token,
+            client_name=client_name,
+            server_name=server_name,
+            server_icon_url=server_icon_url,
+            server_website_url=server_website_url,
+            csp_policy=self._consent_csp_policy,
+        )
+        response = create_secure_html_response(html)
+        self._set_list_cookie(
+            response,
+            "MCP_CONSENT_STATE",
+            self._encode_list_cookie([csrf_token]),
+            max_age=15 * 60,
+        )
+        return response
