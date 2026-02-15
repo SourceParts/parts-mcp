@@ -13,8 +13,10 @@ signing (RS256). This module provides:
 from __future__ import annotations
 
 import base64
+import json
 import logging
 import time
+from contextvars import ContextVar
 from typing import Any
 
 from authlib.jose import JsonWebKey, JsonWebToken
@@ -30,6 +32,11 @@ from cryptography.hazmat.primitives.serialization import (
 from fastmcp.server.auth.oidc_proxy import OIDCProxy
 
 logger = logging.getLogger(__name__)
+
+# Auth0 user claims extracted from id_token during OAuth code exchange.
+# Set by SourcePartsOIDCProxy.exchange_authorization_code, read by
+# RS256JWTIssuer.issue_access_token to embed sub/email in the FastMCP JWT.
+_auth0_user_claims: ContextVar[dict | None] = ContextVar("_auth0_user_claims", default=None)
 
 
 class RS256JWTIssuer:
@@ -94,13 +101,24 @@ class RS256JWTIssuer:
             "iat": now,
             "jti": jti,
         }
+
+        # Merge Auth0 user identity (sub, email) if available.
+        # Set by SourcePartsOIDCProxy during OAuth code exchange.
+        extra = _auth0_user_claims.get()
+        if extra:
+            if extra.get("sub"):
+                payload["sub"] = extra["sub"]
+            if extra.get("email"):
+                payload["email"] = extra["email"]
+
         token_bytes = self._jwt.encode(header, payload, self._private_pem)
         token = token_bytes.decode("utf-8")
         logger.debug(
-            "Issued RS256 access token for client=%s jti=%s exp=%d",
+            "Issued RS256 access token for client=%s jti=%s exp=%d sub=%s",
             client_id,
             jti[:8],
             payload["exp"],
+            payload.get("sub", "none"),
         )
         return token
 
@@ -492,4 +510,35 @@ class SourcePartsOIDCProxy(OIDCProxy):
             max_age=15 * 60,
         )
         return response
+
+    async def exchange_authorization_code(self, client, authorization_code):
+        """Override to extract Auth0 user identity from id_token before issuing JWT.
+
+        Auth0 returns an id_token (when openid scope is requested) containing the
+        user's sub and email. We decode it and pass the claims to RS256JWTIssuer
+        via ContextVar so they're embedded in the FastMCP access token.
+        """
+        code_model = await self._code_store.get(key=authorization_code.code)
+        if code_model and code_model.idp_tokens.get("id_token"):
+            try:
+                # Decode JWT payload without verification — the id_token was
+                # received from Auth0 over HTTPS during the token exchange.
+                parts = code_model.idp_tokens["id_token"].split(".")
+                payload_b64 = parts[1] + "=="  # pad for base64
+                payload = json.loads(base64.urlsafe_b64decode(payload_b64))
+                _auth0_user_claims.set({
+                    "sub": payload.get("sub"),
+                    "email": payload.get("email"),
+                })
+                logger.debug(
+                    "Extracted Auth0 identity from id_token: sub=%s",
+                    payload.get("sub", "unknown"),
+                )
+            except Exception:
+                logger.warning("Failed to decode Auth0 id_token, skipping user claims")
+
+        try:
+            return await super().exchange_authorization_code(client, authorization_code)
+        finally:
+            _auth0_user_claims.set(None)
 

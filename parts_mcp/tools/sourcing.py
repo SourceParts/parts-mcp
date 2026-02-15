@@ -6,7 +6,7 @@ from typing import Any
 
 from fastmcp import FastMCP
 
-from parts_mcp.utils.api_client import SourcePartsAPIError, get_client
+from parts_mcp.utils.api_client import SourcePartsAPIError, get_client, with_user_context
 from parts_mcp.utils.cache import cache_pricing_data, cache_search_results
 
 logger = logging.getLogger(__name__)
@@ -21,6 +21,7 @@ def register_sourcing_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     @cache_pricing_data()
+    @with_user_context
     async def compare_prices(
         part_number: str,
         quantity: int = 1,
@@ -109,6 +110,7 @@ def register_sourcing_tools(mcp: FastMCP) -> None:
             }
 
     @mcp.tool()
+    @with_user_context
     async def check_availability(
         part_numbers: list[str],
         quantities: list[int] | None = None
@@ -214,6 +216,7 @@ def register_sourcing_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     @cache_search_results()
+    @with_user_context
     async def find_alternatives(
         part_number: str,
         parameters: dict[str, Any] | None = None
@@ -270,6 +273,7 @@ def register_sourcing_tools(mcp: FastMCP) -> None:
             }
 
     @mcp.tool()
+    @with_user_context
     async def calculate_bom_cost(
         bom: list[dict[str, Any]],
         quantity: int = 1,

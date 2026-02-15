@@ -6,7 +6,7 @@ from typing import Any
 
 from fastmcp import FastMCP
 
-from parts_mcp.utils.api_client import SourcePartsAPIError, SourcePartsAuthError, get_client
+from parts_mcp.utils.api_client import SourcePartsAPIError, SourcePartsAuthError, get_client, with_user_context
 from parts_mcp.utils.cache import cache_part_details, cache_search_results
 
 logger = logging.getLogger(__name__)
@@ -21,6 +21,7 @@ def register_search_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     @cache_search_results()
+    @with_user_context
     async def search_parts(
         query: str,
         category: str | None = None,
@@ -112,6 +113,7 @@ def register_search_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     @cache_search_results()
+    @with_user_context
     async def search_by_parameters(
         parameters: dict[str, Any],
         category: str,
@@ -168,6 +170,7 @@ def register_search_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     @cache_part_details()
+    @with_user_context
     async def get_part_details(
         part_number: str,
         manufacturer: str | None = None

@@ -3,6 +3,8 @@ Source Parts API client for electronic component searching.
 """
 import logging
 import time
+from contextvars import ContextVar
+from functools import wraps
 from typing import Any
 from urllib.parse import urljoin
 
@@ -18,6 +20,10 @@ from parts_mcp.config import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Auth0 user sub for the current MCP request. Set by with_user_context
+# decorator, read by SourcePartsClient._make_request to forward as a header.
+_mcp_user_sub: ContextVar[str | None] = ContextVar("_mcp_user_sub", default=None)
 
 
 class SourcePartsAPIError(Exception):
@@ -118,12 +124,19 @@ class SourcePartsClient:
                 # Rate limiting
                 self._rate_limit()
 
+                # Forward MCP user identity if available
+                extra_headers = {}
+                user_sub = _mcp_user_sub.get()
+                if user_sub:
+                    extra_headers["X-MCP-User-Sub"] = user_sub
+
                 # Make request
                 response = self.client.request(
                     method=method,
                     url=url,
                     params=params,
-                    json=json_data
+                    json=json_data,
+                    headers=extra_headers,
                 )
 
                 # Check for rate limiting
@@ -610,6 +623,28 @@ class SourcePartsClient:
         except Exception as e:
             logger.error(f"Failed to normalize value: {e}")
             raise
+
+
+def with_user_context(fn):
+    """Decorator for MCP tool handlers — propagates Auth0 sub to API requests."""
+    @wraps(fn)
+    async def wrapper(*args, **kwargs):
+        try:
+            from fastmcp.server.dependencies import get_access_token
+            token = get_access_token()
+            sub = token.claims.get("sub") if token else None
+        except Exception:
+            sub = None
+
+        if sub:
+            reset_token = _mcp_user_sub.set(sub)
+            try:
+                return await fn(*args, **kwargs)
+            finally:
+                _mcp_user_sub.reset(reset_token)
+        else:
+            return await fn(*args, **kwargs)
+    return wrapper
 
 
 # Singleton instance for reuse
