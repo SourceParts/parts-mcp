@@ -47,5 +47,9 @@ DEFAULT_PAGE_SIZE = int(os.getenv("DEFAULT_PAGE_SIZE", "20"))
 MAX_RESULTS = int(os.getenv("MAX_RESULTS", "100"))
 SEARCH_TIMEOUT = int(os.getenv("SEARCH_TIMEOUT", "30"))
 
-# Ensure cache directory exists
-CACHE_DIR.mkdir(parents=True, exist_ok=True)
+# Ensure cache directory exists (fall back to /tmp in containers where ~ may not be writable)
+try:
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+except OSError:
+    CACHE_DIR = Path("/tmp/parts-mcp-cache")
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
