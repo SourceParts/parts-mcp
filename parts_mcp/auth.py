@@ -351,7 +351,7 @@ class SourcePartsOIDCProxy(OIDCProxy):
         )
 
     def get_routes(self, mcp_path: str | None = None):
-        """Override to inject jwks_uri into the OAuth metadata route."""
+        """Override to replace the metadata route with one that includes jwks_uri."""
         from starlette.requests import Request
         from starlette.responses import JSONResponse
         from starlette.routing import Route
@@ -359,30 +359,45 @@ class SourcePartsOIDCProxy(OIDCProxy):
         routes = super().get_routes(mcp_path)
         jwks_uri = str(self.base_url).rstrip("/") + "/.well-known/jwks.json"
 
+        # Build the metadata dict ourselves by reading from the existing
+        # provider state — this avoids trying to call a CORS-wrapped ASGI app.
+        scopes = (
+            self.client_registration_options.valid_scopes
+            if self.client_registration_options and self.client_registration_options.valid_scopes
+            else self.required_scopes
+        )
+        base = str(self.base_url).rstrip("/")
+        metadata_dict = {
+            "issuer": str(self.issuer_url) if self.issuer_url else base + "/",
+            "authorization_endpoint": base + "/authorize",
+            "token_endpoint": base + "/token",
+            "registration_endpoint": base + "/register",
+            "jwks_uri": jwks_uri,
+            "scopes_supported": scopes,
+            "response_types_supported": ["code"],
+            "grant_types_supported": ["authorization_code", "refresh_token"],
+            "token_endpoint_auth_methods_supported": ["client_secret_post", "client_secret_basic"],
+            "revocation_endpoint": base + "/revoke",
+            "revocation_endpoint_auth_methods_supported": ["client_secret_post", "client_secret_basic"],
+            "code_challenge_methods_supported": ["S256"],
+        }
+
+        async def metadata_handler(request: Request) -> JSONResponse:
+            return JSONResponse(
+                content=metadata_dict,
+                headers={"Cache-Control": "public, max-age=3600"},
+            )
+
         patched = []
         for route in routes:
             if (
                 isinstance(route, Route)
                 and route.path == "/.well-known/oauth-authorization-server"
             ):
-                # Wrap the original handler to inject jwks_uri
-                original_handler = route.endpoint
-
-                async def metadata_with_jwks(request: Request, _handler=original_handler) -> JSONResponse:
-                    response = await _handler(request)
-                    body = response.body
-                    import json as json_module
-                    data = json_module.loads(body)
-                    data["jwks_uri"] = jwks_uri
-                    return JSONResponse(
-                        content=data,
-                        headers=dict(response.headers),
-                    )
-
                 patched.append(Route(
                     path="/.well-known/oauth-authorization-server",
-                    endpoint=metadata_with_jwks,
-                    methods=route.methods,
+                    endpoint=metadata_handler,
+                    methods=["GET", "OPTIONS"],
                 ))
             else:
                 patched.append(route)
