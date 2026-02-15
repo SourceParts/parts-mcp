@@ -65,6 +65,7 @@ class RS256JWTIssuer:
         jwk = JsonWebKey.import_key(self._public_pem, {"kty": "RSA"})
         self._jwk_dict = jwk.as_dict()
         self._jwk_dict.update({"alg": "RS256", "use": "sig"})
+        self._kid = self._jwk_dict.get("kid", "")
 
         # Private key PEM for signing
         self._private_pem = private_key.private_bytes(
@@ -83,7 +84,7 @@ class RS256JWTIssuer:
         expires_in: int = 3600,
     ) -> str:
         now = int(time.time())
-        header = {"alg": "RS256", "typ": "JWT"}
+        header = {"alg": "RS256", "typ": "JWT", "kid": self._kid}
         payload = {
             "iss": self.issuer,
             "aud": self.audience,
@@ -111,7 +112,7 @@ class RS256JWTIssuer:
         expires_in: int,
     ) -> str:
         now = int(time.time())
-        header = {"alg": "RS256", "typ": "JWT"}
+        header = {"alg": "RS256", "typ": "JWT", "kid": self._kid}
         payload = {
             "iss": self.issuer,
             "aud": self.audience,
