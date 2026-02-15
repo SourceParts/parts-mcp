@@ -11,6 +11,7 @@ import logging
 import os
 
 from fastmcp import FastMCP
+from mcp.types import Icon
 
 from parts_mcp.prompts.templates import register_prompts
 from parts_mcp.resources.parts import register_parts_resources
@@ -47,7 +48,11 @@ def create_server() -> FastMCP:
     hosted = _is_hosted()
     auth = _create_auth() if hosted else None
 
-    mcp = FastMCP("Parts MCP", auth=auth)
+    mcp = FastMCP(
+        "Parts MCP",
+        auth=auth,
+        icons=[Icon(src="https://source.parts/favicon-310x310.png", mimeType="image/png")],
+    )
     logger.info("Created FastMCP server instance (hosted=%s, auth=%s)", hosted, auth is not None)
 
     # Register resources
