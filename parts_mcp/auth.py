@@ -136,28 +136,19 @@ class RS256JWTIssuer:
     def verify_token(self, token: str) -> dict[str, Any]:
         try:
             payload = self._jwt.decode(token, self._public_pem)
-            logger.debug("RS256 JWT decoded successfully, claims: iss=%s aud=%s jti=%s",
-                         payload.get("iss"), payload.get("aud"), str(payload.get("jti", ""))[:8])
 
             exp = payload.get("exp")
             if exp and exp < time.time():
-                logger.debug("Token expired: exp=%s now=%s", exp, time.time())
                 raise JoseError("Token has expired")
 
             if payload.get("iss") != self.issuer:
-                logger.debug("Issuer mismatch: token=%r expected=%r", payload.get("iss"), self.issuer)
                 raise JoseError("Invalid token issuer")
 
             if payload.get("aud") != self.audience:
-                logger.debug("Audience mismatch: token=%r expected=%r", payload.get("aud"), self.audience)
                 raise JoseError("Invalid token audience")
 
-            logger.debug("RS256 JWT verified successfully")
             return payload
         except JoseError:
-            raise
-        except Exception as e:
-            logger.error("Unexpected error in verify_token: %s", e)
             raise
 
     def get_jwks(self) -> dict:
@@ -502,49 +493,3 @@ class SourcePartsOIDCProxy(OIDCProxy):
         )
         return response
 
-    async def load_access_token(self, token: str):
-        """Override to add step-by-step debug logging for token validation."""
-        try:
-            # Step 0: Log token info
-            segments = token.split(".") if token else []
-            logger.info("load_access_token: token len=%d segments=%d preview=%s",
-                        len(token), len(segments), token[:40] if token else "(empty)")
-
-            # Step 1: Verify our RS256 JWT
-            logger.info("load_access_token: Step 1 - verifying RS256 JWT")
-            payload = self.jwt_issuer.verify_token(token)
-            jti = payload["jti"]
-            logger.info("load_access_token: Step 1 OK - jti=%s", jti[:8])
-
-            # Step 2: Look up JTI mapping
-            logger.info("load_access_token: Step 2 - looking up JTI mapping")
-            jti_mapping = await self._jti_mapping_store.get(key=jti)
-            if not jti_mapping:
-                logger.error("load_access_token: Step 2 FAILED - JTI mapping not found for jti=%s", jti[:8])
-                return None
-            logger.info("load_access_token: Step 2 OK - upstream_token_id=%s", jti_mapping.upstream_token_id[:8])
-
-            # Step 3: Look up upstream tokens
-            logger.info("load_access_token: Step 3 - looking up upstream tokens")
-            upstream_token_set = await self._upstream_token_store.get(key=jti_mapping.upstream_token_id)
-            if not upstream_token_set:
-                logger.error("load_access_token: Step 3 FAILED - upstream token not found")
-                return None
-            upstream_access = upstream_token_set.access_token
-            logger.info("load_access_token: Step 3 OK - got upstream token (%d chars, starts=%s)",
-                        len(upstream_access), upstream_access[:20])
-
-            # Step 4: Validate upstream token
-            logger.info("load_access_token: Step 4 - validating upstream token with %s",
-                        type(self._token_validator).__name__)
-            validated = await self._token_validator.verify_token(upstream_access)
-            if not validated:
-                logger.error("load_access_token: Step 4 FAILED - upstream validation returned None")
-                return None
-            logger.info("load_access_token: Step 4 OK - upstream token validated, scopes=%s",
-                        getattr(validated, 'scopes', 'unknown'))
-            return validated
-
-        except Exception as e:
-            logger.error("load_access_token: EXCEPTION at some step: %s: %s", type(e).__name__, e)
-            return None
