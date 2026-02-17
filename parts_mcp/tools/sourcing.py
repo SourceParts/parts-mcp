@@ -52,11 +52,11 @@ def register_sourcing_tools(mcp: FastMCP) -> None:
                 }
 
             part_data = search_results['results'][0]
-            part_id = part_data.get('id', part_data.get('part_id'))
+            sku = part_data.get('sku', part_data.get('part_number'))
 
             # Get pricing data
-            if part_id:
-                pricing_data = client.get_part_pricing(part_id, quantity=quantity)
+            if sku:
+                pricing_data = client.get_part_pricing(sku, quantity=quantity)
             else:
                 # Use pricing from search results if available
                 pricing_data = {'suppliers': part_data.get('suppliers', [])}
@@ -156,10 +156,10 @@ def register_sourcing_tools(mcp: FastMCP) -> None:
 
                 if part_data:
                     # Get availability info
-                    part_id = part_data.get('id', part_data.get('part_id'))
+                    sku = part_data.get('sku', part_data.get('part_number'))
 
-                    if part_id:
-                        avail_data = client.get_part_availability(part_id)
+                    if sku:
+                        avail_data = client.get_part_availability(sku)
                     else:
                         avail_data = {'suppliers': part_data.get('suppliers', [])}
 

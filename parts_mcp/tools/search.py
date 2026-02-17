@@ -202,13 +202,13 @@ def register_search_tools(mcp: FastMCP) -> None:
                     "success": False
                 }
 
-            # Get the first result's ID
+            # Get the first result's SKU
             part_data = search_results['results'][0]
-            part_id = part_data.get('id', part_data.get('part_id'))
+            sku = part_data.get('sku', part_data.get('part_number'))
 
-            if part_id:
+            if sku:
                 # Get detailed information
-                details = client.get_part_details(part_id)
+                details = client.get_part_details(sku)
 
                 return {
                     "part_number": part_number,
