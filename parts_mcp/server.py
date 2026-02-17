@@ -187,7 +187,12 @@ def _run_http(server: FastMCP, transport: str) -> None:
         )
 
     # Get the MCP ASGI app (includes OAuth endpoints when auth is configured)
-    mcp_app = server.http_app(transport=transport, path=path)
+    # Enable event_store so SSE connections get priming events — required for
+    # Cloudflare-proxied deployments where unbuffered SSE would otherwise hang.
+    from parts_mcp.events import InMemoryEventStore
+    event_store = InMemoryEventStore()
+
+    mcp_app = server.http_app(transport=transport, path=path, event_store=event_store)
 
     # Mount MCP app under a parent Starlette app that also has /health and /jwks
     app = Starlette(
