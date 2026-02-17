@@ -1,6 +1,7 @@
 """
 Source Parts API client for electronic component searching.
 """
+import hashlib
 import logging
 import time
 from contextvars import ContextVar
@@ -196,6 +197,114 @@ class SourcePartsClient:
                     f"API error {e.response.status_code}: {error_detail or e}"
                 ) from e
 
+    def _make_upload_request(
+        self,
+        endpoint: str,
+        file_data: bytes,
+        filename: str,
+        content_type: str = "application/octet-stream",
+        form_fields: dict[str, str] | None = None,
+        retry_count: int = 3,
+    ) -> dict[str, Any]:
+        """Make a multipart file upload request with error handling and retries.
+
+        Args:
+            endpoint: API endpoint path
+            file_data: Raw file bytes
+            filename: Name of the file being uploaded
+            content_type: MIME type of the file
+            form_fields: Additional form fields to include
+            retry_count: Number of retries on failure
+
+        Returns:
+            API response data
+
+        Raises:
+            SourcePartsAPIError: On API errors
+        """
+        base = self.base_url if self.base_url.endswith('/') else self.base_url + '/'
+        url = urljoin(base, endpoint.lstrip('/'))
+
+        for attempt in range(retry_count):
+            try:
+                self._rate_limit()
+
+                extra_headers = {}
+                user_sub = _mcp_user_sub.get()
+                if user_sub:
+                    extra_headers["X-MCP-User-Sub"] = user_sub
+
+                # Use a separate client without Content-Type header so httpx
+                # sets the multipart boundary automatically.
+                upload_headers = {
+                    "Authorization": f"Bearer {self.api_key}",
+                    "User-Agent": "PARTS-MCP/1.0",
+                    **extra_headers,
+                }
+
+                files = {"file": (filename, file_data, content_type)}
+
+                response = httpx.request(
+                    method="POST",
+                    url=url,
+                    files=files,
+                    data=form_fields or {},
+                    headers=upload_headers,
+                    timeout=SEARCH_TIMEOUT,
+                )
+
+                if response.status_code == 429:
+                    retry_after = int(response.headers.get('Retry-After', 60))
+                    if attempt < retry_count - 1:
+                        logger.warning(f"Rate limited, waiting {retry_after}s")
+                        time.sleep(retry_after)
+                        continue
+                    raise SourcePartsRateLimitError(f"Rate limit exceeded, retry after {retry_after}s")
+
+                if response.status_code == 401:
+                    raise SourcePartsAuthError("Invalid API key")
+                elif response.status_code == 403:
+                    raise SourcePartsAuthError("Access forbidden - check API permissions")
+
+                response.raise_for_status()
+
+                raw_response = response.json()
+
+                if isinstance(raw_response, dict):
+                    if raw_response.get("status") == "success" and "data" in raw_response:
+                        return raw_response["data"]
+                    elif raw_response.get("status") == "error":
+                        error_msg = raw_response.get("error", "Unknown error")
+                        raise SourcePartsAPIError(f"API error: {error_msg}")
+
+                return raw_response
+
+            except TimeoutException as e:
+                if attempt < retry_count - 1:
+                    logger.warning(f"Upload timeout, retry {attempt + 1}/{retry_count}")
+                    time.sleep(2 ** attempt)
+                    continue
+                raise SourcePartsAPIError("Upload request timeout") from e
+
+            except RequestError as e:
+                if attempt < retry_count - 1:
+                    logger.warning(f"Upload error: {e}, retry {attempt + 1}/{retry_count}")
+                    time.sleep(2 ** attempt)
+                    continue
+                raise SourcePartsAPIError(f"Upload request error: {e}") from e
+
+            except HTTPStatusError as e:
+                error_detail = ""
+                try:
+                    error_data = e.response.json()
+                    error_detail = error_data.get('message', error_data.get('error', ''))
+                except Exception:
+                    error_detail = e.response.text
+
+                raise SourcePartsAPIError(
+                    f"API error {e.response.status_code}: {error_detail or e}"
+                ) from e
+
     def search_parts(
         self,
         query: str,
@@ -329,6 +438,9 @@ class SourcePartsClient:
     ) -> dict[str, Any]:
         """Search parts by parametric specifications.
 
+        Uses the search endpoint with category/manufacturer as proper filters
+        and remaining parameters as search query terms.
+
         Args:
             category: Part category
             parameters: Parameter filters
@@ -338,18 +450,20 @@ class SourcePartsClient:
         Returns:
             Matching parts
         """
-        # Build query from parameters
+        # Extract known filter fields, pass rest as query terms
+        filters: dict[str, Any] = {'category': category}
         query_parts = []
+
         for param, value in parameters.items():
-            if isinstance(value, (list, tuple)):
-                # Range query
-                query_parts.append(f"{param}:[{value[0]} TO {value[1]}]")
-            else:
-                query_parts.append(f"{param}:{value}")
+            if param == 'manufacturer':
+                filters['manufacturer'] = value
+            elif value is not None:
+                query_parts.append(str(value))
 
-        query = f"category:{category} " + " ".join(query_parts)
+        # Use parameter values as search query (e.g., "10k 0603 1%")
+        query = ' '.join(query_parts) if query_parts else category
 
-        return self.search_parts(query, limit=limit, offset=offset)
+        return self.search_parts(query, filters=filters, limit=limit, offset=offset)
 
     def find_alternatives(
         self,
@@ -622,6 +736,494 @@ class SourcePartsClient:
             return self._make_request('GET', '/values/normalize', params=params)
         except Exception as e:
             logger.error(f"Failed to normalize value: {e}")
+            raise
+
+    # =========================================================================
+    # BOM Endpoints
+    # =========================================================================
+
+    def upload_bom(
+        self,
+        file_data: bytes,
+        filename: str,
+        content_type: str = "application/octet-stream",
+    ) -> dict[str, Any]:
+        """Upload a BOM file for processing and part matching.
+
+        Args:
+            file_data: Raw file bytes
+            filename: Original filename (used for format detection)
+            content_type: MIME type of the file
+
+        Returns:
+            Upload result with job_id and status_url
+        """
+        logger.info(f"Uploading BOM: {filename}")
+
+        try:
+            return self._make_upload_request(
+                '/bom',
+                file_data=file_data,
+                filename=filename,
+                content_type=content_type,
+            )
+        except Exception as e:
+            logger.error(f"BOM upload failed: {e}")
+            raise
+
+    def get_bom_status(self, job_id: str) -> dict[str, Any]:
+        """Check BOM processing status.
+
+        Args:
+            job_id: Job ID returned from upload_bom
+
+        Returns:
+            Status with progress, summary, and bom_id when complete
+        """
+        logger.info(f"Checking BOM status: {job_id}")
+
+        try:
+            return self._make_request('GET', f'/bom/{job_id}/status')
+        except Exception as e:
+            logger.error(f"Failed to get BOM status: {e}")
+            raise
+
+    def get_bom(
+        self,
+        bom_id: str,
+        include_pricing: bool = False,
+        include_inventory: bool = False,
+    ) -> dict[str, Any]:
+        """Get a processed BOM with matched/unmatched parts.
+
+        Args:
+            bom_id: BOM ID (from completed job status)
+            include_pricing: Include pricing data for matched parts
+            include_inventory: Include inventory data for matched parts
+
+        Returns:
+            Full BOM with lines and match status
+        """
+        logger.info(f"Getting BOM: {bom_id}")
+
+        params: dict[str, Any] = {}
+        if include_pricing:
+            params['include_pricing'] = 'true'
+        if include_inventory:
+            params['include_inventory'] = 'true'
+
+        try:
+            return self._make_request('GET', f'/bom/{bom_id}', params=params or None)
+        except Exception as e:
+            logger.error(f"Failed to get BOM: {e}")
+            raise
+
+    # =========================================================================
+    # Manufacturing / DFM Endpoints
+    # =========================================================================
+
+    def submit_dfm(
+        self,
+        project_id: str,
+        bom_id: str | None = None,
+        revision: str | None = None,
+        notes: str | None = None,
+        priority: str = "normal",
+    ) -> dict[str, Any]:
+        """Submit a DFM analysis for a project (project-reference mode).
+
+        Args:
+            project_id: Project ID to analyze
+            bom_id: Optional BOM ID to include in analysis
+            revision: Optional revision identifier
+            notes: Optional notes for the analysis
+            priority: Priority level ("low", "normal", "high")
+
+        Returns:
+            Submission result with job_id and status_url
+        """
+        logger.info(f"Submitting DFM analysis for project: {project_id}")
+
+        json_data: dict[str, Any] = {
+            "project_id": project_id,
+            "priority": priority,
+        }
+        if bom_id:
+            json_data["bom_id"] = bom_id
+        if revision:
+            json_data["revision"] = revision
+        if notes:
+            json_data["notes"] = notes
+
+        try:
+            return self._make_request('POST', '/manufacturing/dfm', json_data=json_data)
+        except Exception as e:
+            logger.error(f"DFM submission failed: {e}")
+            raise
+
+    def upload_dfm(
+        self,
+        file_data: bytes,
+        filename: str,
+        content_type: str = "application/octet-stream",
+        options: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """Upload a gerber package for DFM analysis (file upload mode).
+
+        Args:
+            file_data: Raw file bytes (typically a ZIP of gerbers)
+            filename: Original filename
+            content_type: MIME type of the file
+            options: Additional form fields (project_id, bom_id, priority, etc.)
+
+        Returns:
+            Submission result with job_id and status_url
+        """
+        logger.info(f"Uploading DFM file: {filename}")
+
+        try:
+            return self._make_upload_request(
+                '/manufacturing/dfm',
+                file_data=file_data,
+                filename=filename,
+                content_type=content_type,
+                form_fields=options,
+            )
+        except Exception as e:
+            logger.error(f"DFM upload failed: {e}")
+            raise
+
+    def get_manufacturing_status(self, job_id: str) -> dict[str, Any]:
+        """Check manufacturing job status (DFM, AOI, QC, etc.).
+
+        Args:
+            job_id: Job ID returned from submit_dfm or upload_dfm
+
+        Returns:
+            Status with job_type, progress, and result when complete
+        """
+        logger.info(f"Checking manufacturing status: {job_id}")
+
+        try:
+            return self._make_request('GET', f'/manufacturing/{job_id}/status')
+        except Exception as e:
+            logger.error(f"Failed to get manufacturing status: {e}")
+            raise
+
+    # =========================================================================
+    # Fabrication Endpoints
+    # =========================================================================
+
+    def create_fab_order(
+        self,
+        file_data: bytes | None = None,
+        filename: str | None = None,
+        content_type: str = "application/zip",
+        project_id: str | None = None,
+        quantity: int = 5,
+        layers: int = 2,
+        thickness: float = 1.6,
+        surface_finish: str = "HASL",
+        color: str = "green",
+        priority: str = "normal",
+    ) -> dict[str, Any]:
+        """Create a fabrication order (file upload or project reference).
+
+        Args:
+            file_data: Raw gerber zip bytes (file upload mode)
+            filename: Original filename (file upload mode)
+            content_type: MIME type of the file
+            project_id: Project ID (project reference mode)
+            quantity: Number of boards
+            layers: Number of PCB layers
+            thickness: Board thickness in mm
+            surface_finish: Surface finish type
+            color: Solder mask color
+            priority: Priority level
+
+        Returns:
+            Fab order result with job_id and status_url
+        """
+        specs = {
+            "quantity": str(quantity),
+            "layers": str(layers),
+            "thickness": str(thickness),
+            "surface_finish": surface_finish,
+            "color": color,
+            "priority": priority,
+        }
+
+        if file_data is not None and filename is not None:
+            logger.info(f"Creating fab order with file upload: {filename}")
+            try:
+                return self._make_upload_request(
+                    '/manufacturing/fab',
+                    file_data=file_data,
+                    filename=filename,
+                    content_type=content_type,
+                    form_fields=specs,
+                )
+            except Exception as e:
+                logger.error(f"Fab order upload failed: {e}")
+                raise
+        elif project_id is not None:
+            logger.info(f"Creating fab order for project: {project_id}")
+            json_data = {"project_id": project_id, **specs}
+            try:
+                return self._make_request('POST', '/manufacturing/fab', json_data=json_data)
+            except Exception as e:
+                logger.error(f"Fab order creation failed: {e}")
+                raise
+        else:
+            raise ValueError("Either file_data+filename or project_id must be provided")
+
+    # =========================================================================
+    # Cost Endpoints
+    # =========================================================================
+
+    def estimate_cost(
+        self,
+        parts: list[dict[str, Any]],
+        currency: str = "USD",
+    ) -> dict[str, Any]:
+        """Get a quick cost estimate for a list of parts.
+
+        Args:
+            parts: List of parts with part_number and quantity
+            currency: Currency code
+
+        Returns:
+            Cost estimate breakdown
+        """
+        logger.info(f"Estimating cost for {len(parts)} parts")
+
+        json_data = {"parts": parts, "currency": currency}
+
+        try:
+            return self._make_request('POST', '/costs/estimate', json_data=json_data)
+        except Exception as e:
+            logger.error(f"Cost estimation failed: {e}")
+            raise
+
+    def calculate_cogs(
+        self,
+        source_type: str,
+        source_value: str,
+        build_quantity: int = 1,
+        currency: str = "USD",
+    ) -> dict[str, Any]:
+        """Calculate Cost of Goods Sold.
+
+        Args:
+            source_type: Source type ("bom_id", "project_id", "part_number")
+            source_value: The ID or value for the source type
+            build_quantity: Number of assemblies to build
+            currency: Currency code
+
+        Returns:
+            COGS breakdown with per-unit and total costs
+        """
+        logger.info(f"Calculating COGS: {source_type}={source_value}, qty={build_quantity}")
+
+        json_data = {
+            "source_type": source_type,
+            "source_value": source_value,
+            "build_quantity": build_quantity,
+            "currency": currency,
+        }
+
+        try:
+            return self._make_request('POST', '/costs/cogs', json_data=json_data)
+        except Exception as e:
+            logger.error(f"COGS calculation failed: {e}")
+            raise
+
+    # =========================================================================
+    # Ingest / Identification Endpoints
+    # =========================================================================
+
+    def _make_ingest_request(
+        self,
+        file_data: bytes,
+        filename: str,
+        content_type: str = "image/jpeg",
+        form_fields: dict[str, str] | None = None,
+        retry_count: int = 3,
+    ) -> dict[str, Any]:
+        """Make a multipart ingest upload request with indexed file fields.
+
+        The ingest API expects file_0, hash_0, file_count fields rather than
+        a single 'file' field.
+
+        Args:
+            file_data: Raw file bytes
+            filename: Name of the file being uploaded
+            content_type: MIME type of the file
+            form_fields: Additional form fields (project_id, box_id, etc.)
+            retry_count: Number of retries on failure
+
+        Returns:
+            API response data
+        """
+        base = self.base_url if self.base_url.endswith('/') else self.base_url + '/'
+        url = urljoin(base, 'ingest')
+
+        file_hash = hashlib.sha256(file_data).hexdigest()
+
+        for attempt in range(retry_count):
+            try:
+                self._rate_limit()
+
+                extra_headers = {}
+                user_sub = _mcp_user_sub.get()
+                if user_sub:
+                    extra_headers["X-MCP-User-Sub"] = user_sub
+
+                upload_headers = {
+                    "Authorization": f"Bearer {self.api_key}",
+                    "User-Agent": "PARTS-MCP/1.0",
+                    **extra_headers,
+                }
+
+                files = {"file_0": (filename, file_data, content_type)}
+                data = {
+                    "hash_0": file_hash,
+                    "file_count": "1",
+                    **(form_fields or {}),
+                }
+
+                response = httpx.request(
+                    method="POST",
+                    url=url,
+                    files=files,
+                    data=data,
+                    headers=upload_headers,
+                    timeout=SEARCH_TIMEOUT,
+                )
+
+                if response.status_code == 429:
+                    retry_after = int(response.headers.get('Retry-After', 60))
+                    if attempt < retry_count - 1:
+                        logger.warning(f"Rate limited, waiting {retry_after}s")
+                        time.sleep(retry_after)
+                        continue
+                    raise SourcePartsRateLimitError(f"Rate limit exceeded, retry after {retry_after}s")
+
+                if response.status_code == 401:
+                    raise SourcePartsAuthError("Invalid API key")
+                elif response.status_code == 403:
+                    raise SourcePartsAuthError("Access forbidden - check API permissions")
+
+                response.raise_for_status()
+
+                raw_response = response.json()
+
+                if isinstance(raw_response, dict):
+                    if raw_response.get("status") == "success" and "data" in raw_response:
+                        return raw_response["data"]
+                    elif raw_response.get("status") == "error":
+                        error_msg = raw_response.get("error", "Unknown error")
+                        raise SourcePartsAPIError(f"API error: {error_msg}")
+
+                return raw_response
+
+            except TimeoutException as e:
+                if attempt < retry_count - 1:
+                    logger.warning(f"Ingest upload timeout, retry {attempt + 1}/{retry_count}")
+                    time.sleep(2 ** attempt)
+                    continue
+                raise SourcePartsAPIError("Ingest upload timeout") from e
+
+            except RequestError as e:
+                if attempt < retry_count - 1:
+                    logger.warning(f"Ingest upload error: {e}, retry {attempt + 1}/{retry_count}")
+                    time.sleep(2 ** attempt)
+                    continue
+                raise SourcePartsAPIError(f"Ingest upload error: {e}") from e
+
+            except HTTPStatusError as e:
+                error_detail = ""
+                try:
+                    error_data = e.response.json()
+                    error_detail = error_data.get('message', error_data.get('error', ''))
+                except Exception:
+                    error_detail = e.response.text
+
+                raise SourcePartsAPIError(
+                    f"API error {e.response.status_code}: {error_detail or e}"
+                ) from e
+
+    def upload_for_identification(
+        self,
+        file_data: bytes,
+        filename: str,
+        content_type: str = "image/jpeg",
+        project_id: str | None = None,
+        box_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Upload an image for PCB/component identification.
+
+        Args:
+            file_data: Raw image bytes
+            filename: Original filename
+            content_type: MIME type of the image
+            project_id: Optional project ID to associate
+            box_id: Optional box/shipment ID to associate
+
+        Returns:
+            Identification results with barcodes, OCR, metadata
+        """
+        logger.info(f"Uploading for identification: {filename}")
+
+        form_fields: dict[str, str] = {}
+        if project_id:
+            form_fields["project_id"] = project_id
+        if box_id:
+            form_fields["box_id"] = box_id
+
+        try:
+            return self._make_ingest_request(
+                file_data=file_data,
+                filename=filename,
+                content_type=content_type,
+                form_fields=form_fields or None,
+            )
+        except Exception as e:
+            logger.error(f"Identification upload failed: {e}")
+            raise
+
+    def get_ingest_status(self, job_id: str) -> dict[str, Any]:
+        """Check ingest/identification job status.
+
+        Args:
+            job_id: Job ID returned from upload_for_identification
+
+        Returns:
+            Status with progress and items when complete
+        """
+        logger.info(f"Checking ingest status: {job_id}")
+
+        try:
+            return self._make_request('GET', f'/ingest/{job_id}/status')
+        except Exception as e:
+            logger.error(f"Failed to get ingest status: {e}")
+            raise
+
+    def get_ingest_item(self, short_code: str) -> dict[str, Any]:
+        """Get details for an identified item by short code.
+
+        Args:
+            short_code: Item short code (e.g., SP-XXXXXX)
+
+        Returns:
+            Item details with barcodes, OCR text, metadata
+        """
+        logger.info(f"Getting ingest item: {short_code}")
+
+        try:
+            return self._make_request('GET', f'/ingest/items/{short_code}')
+        except Exception as e:
+            logger.error(f"Failed to get ingest item: {e}")
             raise
 
 

@@ -227,20 +227,9 @@ def register_search_tools(mcp: FastMCP) -> None:
 
         except SourcePartsAPIError as e:
             logger.error(f"Error getting part details: {e}")
-            error_str = str(e)
-
-            if "404" in error_str:
-                return {
-                    "part_number": part_number,
-                    "manufacturer": manufacturer,
-                    "error": "Part details endpoint not found.",
-                    "message": "This may indicate a configuration issue. Please contact support.",
-                    "success": False
-                }
-
             return {
                 "part_number": part_number,
                 "manufacturer": manufacturer,
-                "error": f"Failed to get details: {error_str}",
+                "error": f"Failed to get details: {str(e)}",
                 "success": False
             }

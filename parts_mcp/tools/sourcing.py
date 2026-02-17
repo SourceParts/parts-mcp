@@ -290,7 +290,7 @@ def register_sourcing_tools(mcp: FastMCP) -> None:
             BOM cost analysis
         """
         try:
-            get_client()
+            client = get_client()
             cost_breakdown = []
             total_cost = 0.0
             errors = []
@@ -306,35 +306,56 @@ def register_sourcing_tools(mcp: FastMCP) -> None:
                     })
                     continue
 
-                # Get pricing for this part
+                # Get pricing for this part via API client directly
                 try:
-                    pricing = await compare_prices(
-                        part_number=part_number,
-                        quantity=part_qty,
-                        suppliers=preferred_suppliers
-                    )
+                    # Search for the part to get its SKU
+                    search_results = client.search_parts(part_number, limit=1)
+                    if not search_results.get('results'):
+                        errors.append({
+                            'reference': item.get('reference', ''),
+                            'part_number': part_number,
+                            'error': 'Part not found'
+                        })
+                        continue
 
-                    if pricing.get('success') and pricing.get('best_price'):
-                        best = pricing['best_price']
-                        line_cost = best['total_price']
+                    part_data = search_results['results'][0]
+                    sku = part_data.get('sku', part_data.get('part_number'))
 
+                    if not sku:
+                        errors.append({
+                            'reference': item.get('reference', ''),
+                            'part_number': part_number,
+                            'error': 'No SKU found for part'
+                        })
+                        continue
+
+                    pricing_data = client.get_part_pricing(sku, quantity=part_qty)
+                    price_breaks = pricing_data.get('price_breaks', [])
+
+                    # Find best price for requested quantity
+                    unit_price = None
+                    for pb in sorted(price_breaks, key=lambda x: x.get('quantity', 0)):
+                        if pb.get('quantity', 0) <= part_qty:
+                            unit_price = pb.get('unit_price', pb.get('price'))
+
+                    if unit_price is not None:
+                        line_cost = unit_price * part_qty
                         cost_breakdown.append({
                             'reference': item.get('reference', ''),
                             'part_number': part_number,
                             'description': item.get('value', item.get('description', '')),
                             'quantity': part_qty,
-                            'unit_price': best['unit_price'],
+                            'unit_price': unit_price,
                             'line_total': line_cost,
-                            'supplier': best['supplier'],
-                            'sku': best['sku']
+                            'supplier': 'Source Parts',
+                            'sku': sku
                         })
-
                         total_cost += line_cost
                     else:
                         errors.append({
                             'reference': item.get('reference', ''),
                             'part_number': part_number,
-                            'error': pricing.get('error', 'No pricing found')
+                            'error': 'No pricing available'
                         })
 
                 except Exception as e:
