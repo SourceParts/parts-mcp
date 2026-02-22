@@ -90,6 +90,12 @@ def resolve_file_paths(config: dict[str, Any], project_root: Path) -> dict[str, 
     Looks for string values that look like file paths (contain '/' or '\\' or
     end with common file extensions) and resolves them relative to project_root.
 
+    Handles directory-context conventions: if a dict has a ``directory`` key,
+    its value is used as a prefix when resolving sibling file paths.  Strings
+    nested under a ``contents`` key are treated as references to files *inside*
+    an archive and are flagged with ``inside_archive: True`` instead of being
+    checked on disk.
+
     Args:
         config: Parsed config dict
         project_root: Root directory to resolve paths against
@@ -104,14 +110,19 @@ def resolve_file_paths(config: dict[str, Any], project_root: Path) -> dict[str, 
     }
     resolved: dict[str, Any] = {}
 
-    def _walk(obj: Any, prefix: str = "") -> None:
+    def _walk(obj: Any, prefix: str = "", context_dir: str = "", in_contents: bool = False) -> None:
         if isinstance(obj, dict):
+            # If this dict has a "directory" key, use it as context for children
+            child_context = obj.get("directory", context_dir)
             for key, value in obj.items():
+                if key == "directory":
+                    continue  # skip the directory key itself
                 path_key = f"{prefix}.{key}" if prefix else key
-                _walk(value, path_key)
+                child_in_contents = in_contents or key == "contents"
+                _walk(value, path_key, child_context, child_in_contents)
         elif isinstance(obj, list):
             for i, item in enumerate(obj):
-                _walk(item, f"{prefix}[{i}]")
+                _walk(item, f"{prefix}[{i}]", context_dir, in_contents)
         elif isinstance(obj, str):
             path = Path(obj)
             is_path = (
@@ -120,12 +131,20 @@ def resolve_file_paths(config: dict[str, Any], project_root: Path) -> dict[str, 
                 or path.suffix.lower() in file_extensions
             )
             if is_path:
-                resolved_path = (project_root / path).resolve() if not path.is_absolute() else path
-                resolved[prefix] = {
-                    "original": obj,
-                    "resolved": str(resolved_path),
-                    "exists": resolved_path.exists(),
-                }
+                if in_contents:
+                    resolved[prefix] = {
+                        "original": obj,
+                        "inside_archive": True,
+                        "exists": None,
+                    }
+                else:
+                    base = project_root / context_dir if context_dir else project_root
+                    resolved_path = (base / path).resolve() if not path.is_absolute() else path
+                    resolved[prefix] = {
+                        "original": obj,
+                        "resolved": str(resolved_path),
+                        "exists": resolved_path.exists(),
+                    }
 
     _walk(config)
     return resolved
