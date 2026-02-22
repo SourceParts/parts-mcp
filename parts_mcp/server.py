@@ -16,6 +16,7 @@ from mcp.types import Icon
 from parts_mcp.prompts.templates import register_prompts
 from parts_mcp.resources.parts import register_parts_resources
 from parts_mcp.resources.suppliers import register_supplier_resources
+from parts_mcp.tools.manufacturing import register_manufacturing_tools
 from parts_mcp.tools.search import register_search_tools
 from parts_mcp.tools.sourcing import register_sourcing_tools
 
@@ -114,14 +115,17 @@ def create_server() -> FastMCP:
     logger.info("Registering tools...")
     register_search_tools(mcp)
     register_sourcing_tools(mcp)
+    register_manufacturing_tools(mcp, local_mode=not hosted)
 
-    # KiCad tools require local filesystem access — skip in hosted mode
+    # Local-only tools require filesystem access — skip in hosted mode
     if not hosted:
         from parts_mcp.tools.kicad import register_kicad_tools
+        from parts_mcp.tools.project import register_project_tools
         register_kicad_tools(mcp)
-        logger.info("Registered KiCad tools (local mode)")
+        register_project_tools(mcp)
+        logger.info("Registered local tools (KiCad, project)")
     else:
-        logger.info("Skipped KiCad tools (hosted mode)")
+        logger.info("Skipped local tools (hosted mode)")
 
     # Register prompts
     logger.info("Registering prompts...")

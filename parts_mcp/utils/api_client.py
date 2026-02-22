@@ -93,13 +93,23 @@ class SourcePartsClient:
 
         self._last_request_time = time.time()
 
+    def _get_host_url(self) -> str:
+        """Extract the host URL from the configured base_url.
+
+        E.g. "https://api.source.parts/v1/" -> "https://api.source.parts"
+        """
+        from urllib.parse import urlparse
+        parsed = urlparse(self.base_url)
+        return f"{parsed.scheme}://{parsed.netloc}"
+
     def _make_request(
         self,
         method: str,
         endpoint: str,
         params: dict[str, Any] | None = None,
         json_data: dict[str, Any] | None = None,
-        retry_count: int = 3
+        retry_count: int = 3,
+        base_url: str | None = None,
     ) -> dict[str, Any]:
         """Make an API request with error handling and retries.
 
@@ -109,6 +119,7 @@ class SourcePartsClient:
             params: Query parameters
             json_data: JSON body data
             retry_count: Number of retries on failure
+            base_url: Override base URL for this request (e.g. for /api/ endpoints)
 
         Returns:
             API response data
@@ -117,7 +128,8 @@ class SourcePartsClient:
             SourcePartsAPIError: On API errors
         """
         # Ensure base_url ends with / for proper urljoin behavior
-        base = self.base_url if self.base_url.endswith('/') else self.base_url + '/'
+        effective_base = base_url or self.base_url
+        base = effective_base if effective_base.endswith('/') else effective_base + '/'
         url = urljoin(base, endpoint.lstrip('/'))
 
         for attempt in range(retry_count):
@@ -1224,6 +1236,99 @@ class SourcePartsClient:
             return self._make_request('GET', f'/ingest/items/{short_code}')
         except Exception as e:
             logger.error(f"Failed to get ingest item: {e}")
+            raise
+
+    # =========================================================================
+    # Project Endpoints (/api/projects)
+    # =========================================================================
+
+    def _project_base_url(self) -> str:
+        """Get the base URL for project endpoints (uses /api/ not /v1/)."""
+        return self._get_host_url() + "/api/"
+
+    def get_project(self, project_id: str) -> dict[str, Any]:
+        """Get a project by ID.
+
+        Args:
+            project_id: Project ID
+
+        Returns:
+            Project data
+        """
+        logger.info(f"Getting project: {project_id}")
+
+        try:
+            return self._make_request(
+                'GET', f'projects/{project_id}',
+                base_url=self._project_base_url(),
+            )
+        except Exception as e:
+            logger.error(f"Failed to get project: {e}")
+            raise
+
+    def list_projects(self, search: str | None = None) -> dict[str, Any]:
+        """List projects, optionally filtered by search query.
+
+        Args:
+            search: Optional search string to filter by name
+
+        Returns:
+            List of projects
+        """
+        logger.info(f"Listing projects (search={search!r})")
+
+        params: dict[str, Any] = {}
+        if search:
+            params['search'] = search
+
+        try:
+            return self._make_request(
+                'GET', 'projects',
+                params=params or None,
+                base_url=self._project_base_url(),
+            )
+        except Exception as e:
+            logger.error(f"Failed to list projects: {e}")
+            raise
+
+    def get_project_boms(self, project_id: str) -> dict[str, Any]:
+        """Get BOMs associated with a project.
+
+        Args:
+            project_id: Project ID
+
+        Returns:
+            Project BOMs
+        """
+        logger.info(f"Getting BOMs for project: {project_id}")
+
+        try:
+            return self._make_request(
+                'GET', f'projects/{project_id}/boms',
+                base_url=self._project_base_url(),
+            )
+        except Exception as e:
+            logger.error(f"Failed to get project BOMs: {e}")
+            raise
+
+    def get_project_activity(self, project_id: str) -> dict[str, Any]:
+        """Get recent activity for a project.
+
+        Args:
+            project_id: Project ID
+
+        Returns:
+            Project activity feed
+        """
+        logger.info(f"Getting activity for project: {project_id}")
+
+        try:
+            return self._make_request(
+                'GET', f'projects/{project_id}/activity',
+                base_url=self._project_base_url(),
+            )
+        except Exception as e:
+            logger.error(f"Failed to get project activity: {e}")
             raise
 
 
