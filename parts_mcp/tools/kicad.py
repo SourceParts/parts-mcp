@@ -24,6 +24,7 @@ from parts_mcp.utils.netlist_parser import (
     analyze_connectivity,
     extract_netlist_from_schematic,
 )
+from parts_mcp.utils.pcb_highlight import highlight_nets
 
 logger = logging.getLogger(__name__)
 
@@ -245,6 +246,43 @@ def register_kicad_tools(mcp: FastMCP) -> None:
             Operation result
         """
         return open_project_util(project_path)
+
+    @mcp.tool()
+    async def highlight_net_traces(
+        project_path: str,
+        net_names: list[str],
+        colors: dict[str, str] | None = None,
+        mode: str = "both",
+        output_dir: str | None = None,
+    ) -> dict[str, Any]:
+        """Highlight specific net traces on a PCB and generate PDF(s).
+
+        Renders highlighted net traces as vector PDFs. Supports two output modes:
+        - overlay: Full board with all traces in gray, highlighted nets in color
+        - traces_only: Just the highlighted nets + board outline
+
+        Args:
+            project_path: Path to KiCad project directory or .kicad_pro/.kicad_pcb file
+            net_names: Net names to highlight (e.g. ["nRF54_P", "nRF54_N"])
+            colors: Optional color mapping {"net_name": "#rrggbb"}
+            mode: "overlay", "traces_only", or "both" (default: "both")
+            output_dir: Where to save PDFs (defaults to project dir)
+
+        Returns:
+            Result with file paths and metadata
+        """
+        try:
+            result = await highlight_nets(
+                project_path=project_path,
+                net_names=net_names,
+                colors=colors,
+                mode=mode,
+                output_dir=output_dir,
+            )
+            return result
+        except Exception as e:
+            logger.error(f"Error highlighting nets: {e}")
+            return {"success": False, "error": str(e)}
 
     @mcp.tool()
     async def export_parts_to_kicad(

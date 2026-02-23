@@ -1239,6 +1239,112 @@ class SourcePartsClient:
             raise
 
     # =========================================================================
+    # PCB Highlight Endpoints
+    # =========================================================================
+
+    def highlight_pcb_nets(
+        self,
+        file_data: bytes,
+        filename: str,
+        net_names: list[str],
+        colors: dict[str, str] | None = None,
+        mode: str = "both",
+        layers: str = "",
+    ) -> tuple[bytes, str, dict[str, Any]]:
+        """Highlight net traces on a KiCad PCB and return PDF(s).
+
+        Sends the .kicad_pcb file to /v1/pcb/highlight which proxies to
+        the convert-service for rendering.
+
+        Args:
+            file_data: Raw .kicad_pcb file bytes
+            filename: Original filename
+            net_names: List of net names to highlight
+            colors: Optional color mapping {"net_name": "#rrggbb"}
+            mode: "overlay", "traces_only", or "both"
+            layers: Comma-separated copper layer filter (empty = all)
+
+        Returns:
+            Tuple of (content_bytes, content_type, metadata)
+            - content_bytes: PDF bytes (single mode) or ZIP bytes (both mode)
+            - content_type: "application/pdf" or "application/zip"
+            - metadata: Dict with found_nets, missing_nets, element counts
+
+        Raises:
+            SourcePartsAPIError: On API errors
+        """
+        import json as _json
+
+        logger.info(f"Highlighting nets {net_names} on {filename}")
+
+        base = self.base_url if self.base_url.endswith('/') else self.base_url + '/'
+        url = urljoin(base, 'pcb/highlight')
+
+        self._rate_limit()
+
+        extra_headers = {}
+        user_sub = _mcp_user_sub.get()
+        if user_sub:
+            extra_headers["X-MCP-User-Sub"] = user_sub
+
+        upload_headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "User-Agent": "PARTS-MCP/1.0",
+            **extra_headers,
+        }
+
+        files = {"file": (filename, file_data, "application/octet-stream")}
+        data = {
+            "nets": _json.dumps(net_names),
+            "colors": _json.dumps(colors or {}),
+            "mode": mode,
+            "render": "quick",
+            "layers": layers,
+        }
+
+        try:
+            response = httpx.request(
+                method="POST",
+                url=url,
+                files=files,
+                data=data,
+                headers=upload_headers,
+                timeout=120,
+            )
+
+            if response.status_code == 401:
+                raise SourcePartsAuthError("Invalid API key")
+            elif response.status_code == 403:
+                raise SourcePartsAuthError("Access forbidden")
+
+            if response.status_code != 200:
+                # Try to extract error detail
+                try:
+                    err = response.json()
+                    detail = err.get("error", err.get("detail", response.text[:500]))
+                except Exception:
+                    detail = response.text[:500]
+                raise SourcePartsAPIError(
+                    f"PCB highlight failed ({response.status_code}): {detail}"
+                )
+
+            content_type = response.headers.get("content-type", "application/octet-stream")
+
+            # Parse metadata from header if present
+            meta: dict[str, Any] = {}
+            meta_header = response.headers.get("x-pcb-highlight-meta")
+            if meta_header:
+                try:
+                    meta = _json.loads(meta_header)
+                except Exception:
+                    pass
+
+            return response.content, content_type, meta
+
+        except (TimeoutException, RequestError) as e:
+            raise SourcePartsAPIError(f"PCB highlight request failed: {e}") from e
+
+    # =========================================================================
     # Project Endpoints (/api/projects)
     # =========================================================================
 
