@@ -1345,6 +1345,27 @@ class SourcePartsClient:
             raise SourcePartsAPIError(f"PCB highlight request failed: {e}") from e
 
     # =========================================================================
+    # Docs Endpoints (/api/docs)
+    # =========================================================================
+
+    def get_cli_docs(self, section: str | None = None) -> dict:
+        """Fetch CLI documentation from the Source Parts API.
+
+        Content is tailored server-side based on the authenticated user's account
+        tier (forwarded automatically via X-MCP-User-Sub).
+
+        Args:
+            section: Optional topic filter (e.g. "auth", "search", "bom",
+                     "manufacturing", "project"). Omit for full documentation.
+
+        Returns:
+            CLI documentation data
+        """
+        params = {"section": section} if section else {}
+        return self._make_request("GET", "/v1/docs/cli", params=params,
+                                  base_url=self._get_host_url())
+
+    # =========================================================================
     # Project Endpoints (/api/projects)
     # =========================================================================
 
