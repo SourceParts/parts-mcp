@@ -17,9 +17,11 @@ from parts_mcp.prompts.templates import register_prompts
 from parts_mcp.resources.parts import register_parts_resources
 from parts_mcp.resources.suppliers import register_supplier_resources
 from parts_mcp.tools.datasheet import register_datasheet_tools
+from parts_mcp.tools.docs import register_docs_tools
 from parts_mcp.tools.manufacturing import register_manufacturing_tools
 from parts_mcp.tools.search import register_search_tools
 from parts_mcp.tools.sourcing import register_sourcing_tools
+from parts_mcp.utils.api_client import _mcp_user_sub
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +120,7 @@ def create_server() -> FastMCP:
     register_sourcing_tools(mcp)
     register_manufacturing_tools(mcp, local_mode=not hosted)
     register_datasheet_tools(mcp, local_mode=not hosted)
+    register_docs_tools(mcp)
 
     # Local-only tools require filesystem access — skip in hosted mode
     if not hosted:
@@ -169,6 +172,20 @@ def main() -> None:
         _run_http(server, transport)
 
 
+def _extract_sub_from_bearer(auth_header: str) -> str | None:
+    """Extract 'sub' claim from a Bearer JWT without signature verification."""
+    if not auth_header.startswith("Bearer "):
+        return None
+    try:
+        import base64
+        import json
+        segment = auth_header[7:].split(".")[1]
+        segment += "=" * (4 - len(segment) % 4)
+        return json.loads(base64.urlsafe_b64decode(segment)).get("sub")
+    except Exception:
+        return None
+
+
 def _run_http(server: FastMCP, transport: str) -> None:
     """Run the server in HTTP mode with health and JWKS endpoints."""
     import uvicorn
@@ -192,6 +209,18 @@ def _run_http(server: FastMCP, transport: str) -> None:
             headers={"Cache-Control": "public, max-age=3600"},
         )
 
+    async def docs(request: Request) -> JSONResponse:
+        """Proxy CLI docs from the Source Parts API with user context from JWT."""
+        from parts_mcp.utils.api_client import SourcePartsClient
+        sub = _extract_sub_from_bearer(request.headers.get("Authorization", ""))
+        reset = _mcp_user_sub.set(sub)
+        try:
+            section = request.query_params.get("section")
+            data = SourcePartsClient().get_cli_docs(section=section)
+            return JSONResponse(data)
+        finally:
+            _mcp_user_sub.reset(reset)
+
     # Get the MCP ASGI app (includes OAuth endpoints when auth is configured)
     # Enable event_store so SSE connections get priming events — required for
     # Cloudflare-proxied deployments where unbuffered SSE would otherwise hang.
@@ -204,6 +233,7 @@ def _run_http(server: FastMCP, transport: str) -> None:
     app = Starlette(
         routes=[
             Route("/api/health", health),
+            Route("/api/docs", docs),
             Route("/.well-known/jwks.json", jwks),
         ],
         lifespan=mcp_app.router.lifespan_context,
