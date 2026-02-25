@@ -16,6 +16,7 @@ from mcp.types import Icon
 from parts_mcp.prompts.templates import register_prompts
 from parts_mcp.resources.parts import register_parts_resources
 from parts_mcp.resources.suppliers import register_supplier_resources
+from parts_mcp.tools.datasheet import register_datasheet_tools
 from parts_mcp.tools.manufacturing import register_manufacturing_tools
 from parts_mcp.tools.search import register_search_tools
 from parts_mcp.tools.sourcing import register_sourcing_tools
@@ -116,6 +117,7 @@ def create_server() -> FastMCP:
     register_search_tools(mcp)
     register_sourcing_tools(mcp)
     register_manufacturing_tools(mcp, local_mode=not hosted)
+    register_datasheet_tools(mcp, local_mode=not hosted)
 
     # Local-only tools require filesystem access — skip in hosted mode
     if not hosted:

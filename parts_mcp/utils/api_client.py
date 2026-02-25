@@ -831,6 +831,89 @@ class SourcePartsClient:
             raise
 
     # =========================================================================
+    # Datasheet Endpoints
+    # =========================================================================
+
+    def chunk_datasheet(
+        self,
+        file_data: bytes,
+        filename: str,
+        content_type: str = "application/pdf",
+        method: str = "pdfplumber",
+        chunk_pages: int = 5,
+        include_toc: bool = True,
+        sku: str | None = None,
+    ) -> dict[str, Any]:
+        """Upload a datasheet PDF for chunked text extraction.
+
+        Args:
+            file_data: Raw PDF bytes
+            filename: Original filename
+            content_type: MIME type of the file
+            method: Extraction method (pdfplumber, pymupdf)
+            chunk_pages: Pages per chunk
+            include_toc: Whether to detect and return TOC
+            sku: Optional SKU to cache results on CDN
+
+        Returns:
+            Chunked text with TOC and metadata
+        """
+        logger.info(f"Chunking datasheet: {filename} (method={method}, chunk_pages={chunk_pages})")
+
+        form_fields: dict[str, str] = {
+            "method": method,
+            "chunk_pages": str(chunk_pages),
+            "include_toc": str(include_toc).lower(),
+        }
+        if sku:
+            form_fields["sku"] = sku
+
+        try:
+            return self._make_upload_request(
+                '/datasheets/chunk',
+                file_data=file_data,
+                filename=filename,
+                content_type=content_type,
+                form_fields=form_fields,
+            )
+        except Exception as e:
+            logger.error(f"Datasheet chunking failed: {e}")
+            raise
+
+    def get_datasheet_chunks(
+        self,
+        sku: str,
+        chunk_pages: int = 5,
+        refresh: bool = False,
+        method: str = "pdfplumber",
+    ) -> dict[str, Any]:
+        """Retrieve cached datasheet chunks by SKU.
+
+        Args:
+            sku: Part SKU to look up
+            chunk_pages: Pages per chunk
+            refresh: Force re-extraction from PDF
+            method: Extraction method
+
+        Returns:
+            Cached chunks with TOC and metadata
+        """
+        logger.info(f"Getting datasheet chunks for SKU: {sku}")
+
+        params: dict[str, Any] = {
+            "chunk_pages": chunk_pages,
+            "method": method,
+        }
+        if refresh:
+            params["refresh"] = "true"
+
+        try:
+            return self._make_request('GET', f'/datasheets/{sku}/chunks', params=params)
+        except Exception as e:
+            logger.error(f"Failed to get datasheet chunks: {e}")
+            raise
+
+    # =========================================================================
     # Manufacturing / DFM Endpoints
     # =========================================================================
 
