@@ -8,11 +8,18 @@ Supports two transport modes:
 Set MCP_TRANSPORT=streamable-http to enable hosted mode with Auth0 OAuth.
 """
 import logging
-import os
 
 from fastmcp import FastMCP
 from mcp.types import Icon
 
+from parts_mcp.config import (
+    AuthConfig,
+    ServerConfig,
+    StorageConfig,
+    load_auth_config,
+    load_server_config,
+    load_storage_config,
+)
 from parts_mcp.prompts.templates import register_prompts
 from parts_mcp.resources.parts import register_parts_resources
 from parts_mcp.resources.suppliers import register_supplier_resources
@@ -29,26 +36,19 @@ logger = logging.getLogger(__name__)
 _jwt_issuer = None
 
 
-def _is_hosted() -> bool:
-    """Check if server is running in hosted (HTTP) mode."""
-    return os.getenv("MCP_TRANSPORT", "stdio") != "stdio"
-
-
-def _create_storage(client_secret: str):
+def _create_storage(storage_cfg: StorageConfig, client_secret: str):
     """Create OAuth state storage backend.
 
-    - MCP_REDIS_URL set: use RedisStore (production — Valkey on Docker network)
-    - MCP_STORAGE_DIR set: use encrypted DiskStore at that path (self-hosting with volume mount)
+    - redis_url set: use RedisStore (production — Valkey on Docker network)
+    - storage_dir set: use encrypted DiskStore at that path (self-hosting with volume mount)
     - Neither: let OAuthProxy use its default (encrypted DiskStore in temp dir)
     """
-    redis_url = os.getenv("MCP_REDIS_URL")
-    if redis_url:
+    if storage_cfg.redis_url:
         from key_value.aio.stores.redis import RedisStore
         logger.info("Using Redis storage backend for OAuth state")
-        return RedisStore(url=redis_url)
+        return RedisStore(url=storage_cfg.redis_url)
 
-    storage_dir = os.getenv("MCP_STORAGE_DIR")
-    if storage_dir:
+    if storage_cfg.storage_dir:
         from pathlib import Path
 
         from cryptography.fernet import Fernet
@@ -59,16 +59,16 @@ def _create_storage(client_secret: str):
         jwt_key = derive_jwt_key(high_entropy_material=client_secret, salt="fastmcp-jwt-signing-key")
         encryption_key = derive_jwt_key(high_entropy_material=jwt_key.decode(), salt="fastmcp-storage-encryption-key")
 
-        logger.info("Using encrypted disk storage at %s for OAuth state", storage_dir)
+        logger.info("Using encrypted disk storage at %s for OAuth state", storage_cfg.storage_dir)
         return FernetEncryptionWrapper(
-            key_value=DiskStore(directory=Path(storage_dir)),
+            key_value=DiskStore(directory=Path(storage_cfg.storage_dir)),
             fernet=Fernet(key=encryption_key),
         )
 
     return None
 
 
-def _create_auth():
+def _create_auth(auth_cfg: AuthConfig, storage_cfg: StorageConfig):
     """Create OAuth provider for hosted mode.
 
     Uses SourcePartsOIDCProxy with RS256 JWT signing when MCP_JWT_RSA_PRIVATE_KEY
@@ -76,34 +76,29 @@ def _create_auth():
     """
     global _jwt_issuer
 
-    rsa_key_b64 = os.getenv("MCP_JWT_RSA_PRIVATE_KEY")
-    if rsa_key_b64:
+    if auth_cfg.has_rsa_key:
         try:
             from parts_mcp.auth import RS256JWTIssuer, SourcePartsOIDCProxy, load_rsa_private_key
-            from fastmcp.server.auth.providers.auth0 import Auth0ProviderSettings
 
-            rsa_pem = load_rsa_private_key(rsa_key_b64)
+            rsa_pem = load_rsa_private_key(auth_cfg.rsa_private_key_b64)
 
-            # Read Auth0 settings from FASTMCP_SERVER_AUTH_AUTH0_* env vars
-            settings = Auth0ProviderSettings()
-            if not all([settings.config_url, settings.client_id, settings.client_secret, settings.audience, settings.base_url]):
+            if not auth_cfg.has_required_auth0:
                 raise ValueError("Missing required Auth0 env vars")
 
-            client_storage = _create_storage(settings.client_secret.get_secret_value())
+            client_storage = _create_storage(storage_cfg, auth_cfg.client_secret)
 
             proxy = SourcePartsOIDCProxy(
                 rsa_private_key_pem=rsa_pem,
                 valid_scopes=["openid", "profile", "email", "offline_access"],
-                config_url=settings.config_url,
-                client_id=settings.client_id,
-                client_secret=settings.client_secret.get_secret_value(),
-                audience=settings.audience,
-                base_url=settings.base_url,
-                issuer_url=settings.issuer_url,
-                redirect_path=settings.redirect_path,
-                required_scopes=settings.required_scopes or ["openid"],
-                allowed_client_redirect_uris=settings.allowed_client_redirect_uris,
-                jwt_signing_key=settings.jwt_signing_key,
+                config_url=auth_cfg.config_url,
+                client_id=auth_cfg.client_id,
+                client_secret=auth_cfg.client_secret,
+                audience=auth_cfg.audience,
+                base_url=auth_cfg.base_url,
+                issuer_url=auth_cfg.issuer_url,
+                redirect_path=auth_cfg.redirect_path,
+                required_scopes=["openid"],
+                jwt_signing_key=auth_cfg.jwt_signing_key,
                 client_storage=client_storage,
             )
 
@@ -125,19 +120,33 @@ def _create_auth():
     # Fallback: standard Auth0Provider (HS256, no JWKS endpoint)
     try:
         from fastmcp.server.auth.providers.auth0 import Auth0Provider
-        logger.info("No RSA key configured, using standard Auth0Provider (HS256)")
-        return Auth0Provider()
+
+        if auth_cfg.has_required_auth0:
+            logger.info("No RSA key configured, using standard Auth0Provider (HS256)")
+            return Auth0Provider(
+                config_url=auth_cfg.config_url,
+                client_id=auth_cfg.client_id,
+                client_secret=auth_cfg.client_secret,
+                audience=auth_cfg.audience,
+                base_url=auth_cfg.base_url,
+                issuer_url=auth_cfg.issuer_url,
+                redirect_path=auth_cfg.redirect_path,
+                jwt_signing_key=auth_cfg.jwt_signing_key,
+            )
+
+        logger.warning("Auth0 not configured, running without auth")
+        return None
     except (ImportError, ValueError) as e:
         logger.warning("Auth0 not configured, running without auth: %s", e)
         return None
 
 
-def create_server() -> FastMCP:
+def create_server(server_cfg: ServerConfig, auth_cfg: AuthConfig, storage_cfg: StorageConfig) -> FastMCP:
     """Create and configure the Parts MCP server."""
     logger.info("Initializing Parts MCP server")
 
-    hosted = _is_hosted()
-    auth = _create_auth() if hosted else None
+    hosted = server_cfg.is_hosted
+    auth = _create_auth(auth_cfg, storage_cfg) if hosted else None
 
     mcp = FastMCP(
         "Parts MCP",
@@ -177,9 +186,9 @@ def create_server() -> FastMCP:
     return mcp
 
 
-def setup_logging() -> None:
+def setup_logging(server_cfg: ServerConfig) -> None:
     """Configure logging for the server."""
-    level = os.getenv("LOG_LEVEL", "INFO").upper()
+    level = server_cfg.log_level.upper()
     logging.basicConfig(
         level=getattr(logging, level, logging.INFO),
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -188,14 +197,17 @@ def setup_logging() -> None:
 
 def main() -> None:
     """Start the Parts MCP server."""
-    setup_logging()
+    server_cfg = load_server_config()
+    auth_cfg = load_auth_config()
+    storage_cfg = load_storage_config()
 
-    transport = os.getenv("MCP_TRANSPORT", "stdio")
-    logger.info("Starting Parts MCP server (transport=%s)...", transport)
+    setup_logging(server_cfg)
 
-    server = create_server()
+    logger.info("Starting Parts MCP server (transport=%s)...", server_cfg.transport)
 
-    if transport == "stdio":
+    server = create_server(server_cfg, auth_cfg, storage_cfg)
+
+    if not server_cfg.is_hosted:
         try:
             server.run()
         except KeyboardInterrupt:
@@ -206,7 +218,7 @@ def main() -> None:
         finally:
             logger.info("Server shutdown complete")
     else:
-        _run_http(server, transport)
+        _run_http(server, server_cfg)
 
 
 def _extract_sub_from_bearer(auth_header: str) -> str | None:
@@ -223,17 +235,13 @@ def _extract_sub_from_bearer(auth_header: str) -> str | None:
         return None
 
 
-def _run_http(server: FastMCP, transport: str) -> None:
+def _run_http(server: FastMCP, server_cfg: ServerConfig) -> None:
     """Run the server in HTTP mode with health and JWKS endpoints."""
     import uvicorn
     from starlette.applications import Starlette
     from starlette.requests import Request
     from starlette.responses import JSONResponse
     from starlette.routing import Route
-
-    host = os.getenv("MCP_HOST", "0.0.0.0")
-    port = int(os.getenv("MCP_PORT", "8000"))
-    path = os.getenv("MCP_PATH", "/mcp")
 
     async def health(request: Request) -> JSONResponse:
         return JSONResponse({"status": "ok", "service": "parts-mcp"})
@@ -264,7 +272,7 @@ def _run_http(server: FastMCP, transport: str) -> None:
     from parts_mcp.events import InMemoryEventStore
     event_store = InMemoryEventStore()
 
-    mcp_app = server.http_app(transport=transport, path=path, event_store=event_store)
+    mcp_app = server.http_app(transport=server_cfg.transport, path=server_cfg.path, event_store=event_store)
 
     # Mount MCP app under a parent Starlette app that also has /health and /jwks
     app = Starlette(
@@ -277,8 +285,9 @@ def _run_http(server: FastMCP, transport: str) -> None:
     )
     app.mount("/", mcp_app)
 
-    logger.info("Starting HTTP server on %s:%d (transport=%s, path=%s)", host, port, transport, path)
-    uvicorn.run(app, host=host, port=port, log_level=os.getenv("LOG_LEVEL", "info").lower())
+    logger.info("Starting HTTP server on %s:%d (transport=%s, path=%s)",
+                 server_cfg.host, server_cfg.port, server_cfg.transport, server_cfg.path)
+    uvicorn.run(app, host=server_cfg.host, port=server_cfg.port, log_level=server_cfg.log_level.lower())
 
 
 if __name__ == "__main__":
