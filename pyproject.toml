@@ -62,6 +62,8 @@ dependencies = [
 hosted = [
     "uvicorn>=0.30.0",
     "starlette>=0.37.0",
+    "py-key-value-aio[redis]>=0.1.0",
+    "cryptography>=42.0.0",
 ]
 dev = [
     "pytest>=7.0.0",
