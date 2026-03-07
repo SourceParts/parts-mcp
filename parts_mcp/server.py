@@ -34,6 +34,40 @@ def _is_hosted() -> bool:
     return os.getenv("MCP_TRANSPORT", "stdio") != "stdio"
 
 
+def _create_storage(client_secret: str):
+    """Create OAuth state storage backend.
+
+    - MCP_REDIS_URL set: use RedisStore (production — Valkey on Docker network)
+    - MCP_STORAGE_DIR set: use encrypted DiskStore at that path (self-hosting with volume mount)
+    - Neither: let OAuthProxy use its default (encrypted DiskStore in temp dir)
+    """
+    redis_url = os.getenv("MCP_REDIS_URL")
+    if redis_url:
+        from key_value.aio.stores.redis import RedisStore
+        logger.info("Using Redis storage backend for OAuth state")
+        return RedisStore(url=redis_url)
+
+    storage_dir = os.getenv("MCP_STORAGE_DIR")
+    if storage_dir:
+        from pathlib import Path
+
+        from cryptography.fernet import Fernet
+        from key_value.aio.stores.disk import DiskStore
+        from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
+        from fastmcp.server.auth.jwt_issuer import derive_jwt_key
+
+        jwt_key = derive_jwt_key(high_entropy_material=client_secret, salt="fastmcp-jwt-signing-key")
+        encryption_key = derive_jwt_key(high_entropy_material=jwt_key.decode(), salt="fastmcp-storage-encryption-key")
+
+        logger.info("Using encrypted disk storage at %s for OAuth state", storage_dir)
+        return FernetEncryptionWrapper(
+            key_value=DiskStore(directory=Path(storage_dir)),
+            fernet=Fernet(key=encryption_key),
+        )
+
+    return None
+
+
 def _create_auth():
     """Create OAuth provider for hosted mode.
 
@@ -55,6 +89,8 @@ def _create_auth():
             if not all([settings.config_url, settings.client_id, settings.client_secret, settings.audience, settings.base_url]):
                 raise ValueError("Missing required Auth0 env vars")
 
+            client_storage = _create_storage(settings.client_secret.get_secret_value())
+
             proxy = SourcePartsOIDCProxy(
                 rsa_private_key_pem=rsa_pem,
                 valid_scopes=["openid", "profile", "email", "offline_access"],
@@ -68,6 +104,7 @@ def _create_auth():
                 required_scopes=settings.required_scopes or ["openid"],
                 allowed_client_redirect_uris=settings.allowed_client_redirect_uris,
                 jwt_signing_key=settings.jwt_signing_key,
+                client_storage=client_storage,
             )
 
             # Store reference for JWKS endpoint — the actual RS256JWTIssuer is

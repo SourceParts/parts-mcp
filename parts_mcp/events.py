@@ -8,7 +8,7 @@ import logging
 import threading
 from collections import defaultdict
 
-from mcp.server.streamable_http import EventCallback, EventId, EventStore, StreamId
+from mcp.server.streamable_http import EventCallback, EventId, EventMessage, EventStore, StreamId
 from mcp.types import JSONRPCMessage
 
 logger = logging.getLogger(__name__)
@@ -57,6 +57,6 @@ class InMemoryEventStore(EventStore):
                 # Found the stream, replay events
                 for eid, msg in to_replay:
                     if msg is not None:
-                        await send_callback(eid, msg)
+                        await send_callback(EventMessage(message=msg, event_id=eid))
                 return stream_id
         return None
