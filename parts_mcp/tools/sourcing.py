@@ -55,42 +55,46 @@ def register_sourcing_tools(mcp: FastMCP) -> None:
             part_data = search_results['results'][0]
             sku = part_data.get('sku', part_data.get('part_number'))
 
-            # Get pricing data
+            # Get pricing data from the API
             if sku:
                 pricing_data = client.get_part_pricing(sku, quantity=quantity)
             else:
-                # Use pricing from search results if available
-                pricing_data = {'suppliers': part_data.get('suppliers', [])}
+                pricing_data = {}
 
-            # Format pricing comparison
+            # The API returns {"part_number": ..., "price_breaks": [...]}
+            # Each price break is {"quantity": N, "unit_price": X}
+            price_breaks = pricing_data.get('price_breaks', [])
+
             prices = []
-            for supplier in pricing_data.get('suppliers', []):
-                supplier_name = supplier.get('name', supplier.get('supplier'))
-
-                # Filter by requested suppliers if specified
-                if suppliers and supplier_name not in suppliers:
-                    continue
-
-                # Find appropriate price break
-                price = None
-                price_breaks = supplier.get('price_breaks', supplier.get('pricing', []))
-
+            if price_breaks:
+                # Find the best price break for the requested quantity
+                unit_price = None
                 for pb in sorted(price_breaks, key=lambda x: x.get('quantity', 0)):
                     if pb.get('quantity', 0) <= quantity:
-                        price = pb.get('price', pb.get('unit_price'))
+                        unit_price = pb.get('unit_price')
 
-                if price is not None:
+                if unit_price is not None:
+                    source = part_data.get('metadata', {}).get('external_source', 'Source Parts')
                     prices.append({
-                        'supplier': supplier_name,
-                        'sku': supplier.get('sku', supplier.get('part_number')),
-                        'unit_price': price,
-                        'total_price': price * quantity,
-                        'stock': supplier.get('stock', supplier.get('quantity_available', 0)),
-                        'lead_time': supplier.get('lead_time', 'Check supplier')
+                        'supplier': source.upper() if source != 'Source Parts' else source,
+                        'sku': sku,
+                        'unit_price': unit_price,
+                        'total_price': unit_price * quantity,
+                        'stock': part_data.get('stock_quantity', 0),
+                        'lead_time': f"{part_data.get('lead_time_days', 0)} days" if part_data.get('lead_time_days') else 'Check supplier'
                     })
-
-            # Sort by total price
-            prices.sort(key=lambda x: x['total_price'])
+            elif part_data.get('price') is not None:
+                # Fallback: use price from search result directly
+                base_price = float(part_data['price'])
+                source = part_data.get('metadata', {}).get('external_source', 'Source Parts')
+                prices.append({
+                    'supplier': source.upper() if source != 'Source Parts' else source,
+                    'sku': sku,
+                    'unit_price': base_price,
+                    'total_price': base_price * quantity,
+                    'stock': part_data.get('stock_quantity', 0),
+                    'lead_time': f"{part_data.get('lead_time_days', 0)} days" if part_data.get('lead_time_days') else 'Check supplier'
+                })
 
             return {
                 "part_number": part_number,
