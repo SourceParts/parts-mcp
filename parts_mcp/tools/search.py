@@ -6,7 +6,12 @@ from typing import Any
 
 from fastmcp import FastMCP
 
-from parts_mcp.utils.api_client import SourcePartsAPIError, SourcePartsAuthError, get_client, with_user_context
+from parts_mcp.utils.api_client import (
+    SourcePartsAPIError,
+    SourcePartsAuthError,
+    get_client,
+    with_user_context,
+)
 from parts_mcp.utils.cache import cache_part_details, cache_search_results
 
 logger = logging.getLogger(__name__)

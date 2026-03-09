@@ -52,9 +52,9 @@ def _create_storage(storage_cfg: StorageConfig, client_secret: str):
         from pathlib import Path
 
         from cryptography.fernet import Fernet
+        from fastmcp.server.auth.jwt_issuer import derive_jwt_key
         from key_value.aio.stores.disk import DiskStore
         from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
-        from fastmcp.server.auth.jwt_issuer import derive_jwt_key
 
         jwt_key = derive_jwt_key(high_entropy_material=client_secret, salt="fastmcp-jwt-signing-key")
         encryption_key = derive_jwt_key(high_entropy_material=jwt_key.decode(), salt="fastmcp-storage-encryption-key")

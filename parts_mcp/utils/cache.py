@@ -1,5 +1,8 @@
 """
 Caching utilities for Parts MCP using diskcache.
+
+Uses JSONDisk instead of the default pickle-based Disk to avoid
+pickle deserialization vulnerabilities (CVE-2025-69872).
 """
 import hashlib
 import json
@@ -14,8 +17,9 @@ from parts_mcp.config import CACHE_DIR, CACHE_EXPIRY_HOURS
 
 logger = logging.getLogger(__name__)
 
-# Initialize cache
-cache = diskcache.Cache(str(CACHE_DIR))
+# Initialize cache with JSON serialization instead of pickle.
+# All cached values are API response dicts (JSON-safe).
+cache = diskcache.Cache(str(CACHE_DIR), disk=diskcache.JSONDisk, disk_compress_level=6)
 
 # Cache expiry in seconds
 DEFAULT_EXPIRY = CACHE_EXPIRY_HOURS * 3600

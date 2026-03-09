@@ -28,7 +28,6 @@ from cryptography.hazmat.primitives.serialization import (
     PublicFormat,
     load_pem_private_key,
 )
-
 from fastmcp.server.auth.oidc_proxy import OIDCProxy
 
 logger = logging.getLogger(__name__)
@@ -198,8 +197,8 @@ def _create_consent_html(
 
     from fastmcp.utilities.ui import (
         BUTTON_STYLES,
-        DETAILS_STYLES,
         DETAIL_BOX_STYLES,
+        DETAILS_STYLES,
         INFO_BOX_STYLES,
         REDIRECT_SECTION_STYLES,
         TOOLTIP_STYLES,
@@ -453,8 +452,9 @@ class SourcePartsOIDCProxy(OIDCProxy):
             return RedirectResponse(url=upstream_url, status_code=302)
 
         if client_key in denied:
-            from starlette.responses import RedirectResponse
             from urllib.parse import urlencode
+
+            from starlette.responses import RedirectResponse
             callback_params = {
                 "error": "access_denied",
                 "state": txn.get("client_state") or "",
