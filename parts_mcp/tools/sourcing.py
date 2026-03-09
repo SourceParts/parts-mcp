@@ -1,6 +1,7 @@
 """
 Sourcing tools for price comparison and availability checking.
 """
+import asyncio
 import logging
 from typing import Any
 
@@ -295,44 +296,44 @@ def register_sourcing_tools(mcp: FastMCP) -> None:
             total_cost = 0.0
             errors = []
 
-            for item in bom:
+            async def _price_item(item: dict[str, Any]) -> tuple[dict | None, dict | None]:
+                """Return (breakdown_entry, error_entry) for a single BOM line."""
                 part_number = item.get('part_number', item.get('mpn', ''))
                 part_qty = item.get('quantity', 1) * quantity
 
                 if not part_number:
-                    errors.append({
+                    return None, {
                         'reference': item.get('reference', 'Unknown'),
                         'error': 'No part number specified'
-                    })
-                    continue
+                    }
 
-                # Get pricing for this part via API client directly
+                loop = asyncio.get_event_loop()
                 try:
-                    # Search for the part to get its SKU
-                    search_results = client.search_parts(part_number, limit=1)
+                    search_results = await loop.run_in_executor(
+                        None, lambda: client.search_parts(part_number, limit=1)
+                    )
                     if not search_results.get('results'):
-                        errors.append({
+                        return None, {
                             'reference': item.get('reference', ''),
                             'part_number': part_number,
                             'error': 'Part not found'
-                        })
-                        continue
+                        }
 
                     part_data = search_results['results'][0]
                     sku = part_data.get('sku', part_data.get('part_number'))
 
                     if not sku:
-                        errors.append({
+                        return None, {
                             'reference': item.get('reference', ''),
                             'part_number': part_number,
                             'error': 'No SKU found for part'
-                        })
-                        continue
+                        }
 
-                    pricing_data = client.get_part_pricing(sku, quantity=part_qty)
+                    pricing_data = await loop.run_in_executor(
+                        None, lambda: client.get_part_pricing(sku, quantity=part_qty)
+                    )
                     price_breaks = pricing_data.get('price_breaks', [])
 
-                    # Find best price for requested quantity
                     unit_price = None
                     for pb in sorted(price_breaks, key=lambda x: x.get('quantity', 0)):
                         if pb.get('quantity', 0) <= part_qty:
@@ -340,7 +341,7 @@ def register_sourcing_tools(mcp: FastMCP) -> None:
 
                     if unit_price is not None:
                         line_cost = unit_price * part_qty
-                        cost_breakdown.append({
+                        return {
                             'reference': item.get('reference', ''),
                             'part_number': part_number,
                             'description': item.get('value', item.get('description', '')),
@@ -349,21 +350,36 @@ def register_sourcing_tools(mcp: FastMCP) -> None:
                             'line_total': line_cost,
                             'supplier': 'Source Parts',
                             'sku': sku
-                        })
-                        total_cost += line_cost
+                        }, None
                     else:
-                        errors.append({
+                        return None, {
                             'reference': item.get('reference', ''),
                             'part_number': part_number,
                             'error': 'No pricing available'
-                        })
+                        }
 
                 except Exception as e:
-                    errors.append({
+                    return None, {
                         'reference': item.get('reference', ''),
                         'part_number': part_number,
                         'error': str(e)
-                    })
+                    }
+
+            # Run all BOM item lookups concurrently (max 10 at a time to avoid hammering the API)
+            semaphore = asyncio.Semaphore(10)
+
+            async def _price_item_throttled(item: dict[str, Any]) -> tuple[dict | None, dict | None]:
+                async with semaphore:
+                    return await _price_item(item)
+
+            results = await asyncio.gather(*[_price_item_throttled(item) for item in bom])
+
+            for entry, error in results:
+                if entry is not None:
+                    cost_breakdown.append(entry)
+                    total_cost += entry['line_total']
+                elif error is not None:
+                    errors.append(error)
 
             # Sort by line total (most expensive first)
             cost_breakdown.sort(key=lambda x: x['line_total'], reverse=True)
