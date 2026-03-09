@@ -196,7 +196,7 @@ def _create_consent_html(
     import html as html_module
     from urllib.parse import urlparse
 
-    from fastmcp.server.auth.oauth_proxy import (
+    from fastmcp.utilities.ui import (
         BUTTON_STYLES,
         DETAILS_STYLES,
         DETAIL_BOX_STYLES,
