@@ -160,32 +160,25 @@ def register_sourcing_tools(mcp: FastMCP) -> None:
                         part_data = None
 
                 if part_data:
-                    # Get availability info
                     sku = part_data.get('sku', part_data.get('part_number'))
 
-                    if sku:
-                        avail_data = client.get_part_availability(sku)
-                    else:
-                        avail_data = {'suppliers': part_data.get('suppliers', [])}
+                    # The API returns stock_quantity directly on the product,
+                    # not a suppliers array. Read it from the search result.
+                    total_stock = part_data.get('stock_quantity', 0) or 0
+                    source = part_data.get('metadata', {}).get('external_source', 'Source Parts')
 
-                    # Check stock levels
                     in_stock_suppliers = []
-                    total_stock = 0
-
-                    for supplier in avail_data.get('suppliers', []):
-                        stock = supplier.get('stock', supplier.get('quantity_available', 0))
-                        if stock >= qty_needed:
-                            in_stock_suppliers.append({
-                                'supplier': supplier.get('name', supplier.get('supplier')),
-                                'stock': stock,
-                                'sku': supplier.get('sku')
-                            })
-                        total_stock += stock
+                    if total_stock >= qty_needed:
+                        in_stock_suppliers.append({
+                            'supplier': source.upper() if source != 'Source Parts' else source,
+                            'stock': total_stock,
+                            'sku': sku
+                        })
 
                     availability.append({
                         'part_number': part_number,
                         'quantity_needed': qty_needed,
-                        'available': len(in_stock_suppliers) > 0,
+                        'available': total_stock >= qty_needed,
                         'total_stock': total_stock,
                         'in_stock_suppliers': in_stock_suppliers,
                         'manufacturer': part_data.get('manufacturer'),
