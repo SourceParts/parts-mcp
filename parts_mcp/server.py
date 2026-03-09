@@ -271,10 +271,13 @@ def _run_http(server: FastMCP, server_cfg: ServerConfig) -> None:
     # tracking. This makes redeploys transparent: there are no in-memory
     # sessions to lose, so clients never get "Session not found" errors.
     #
-    # Re-evaluate once upstream fixes land:
+    # Re-evaluate once upstream fixes land (all open as of 2026-03-09):
     #   - modelcontextprotocol/python-sdk#880  (session persistence / horizontal scaling)
     #   - anthropics/claude-code#30224         (auto-reconnect SSE MCP after restart)
     #   - anthropics/claude-code#10129         (auto-reconnect for MCP servers)
+    #   - PrefectHQ/fastmcp#831               (client errors on server restart)
+    #   - PrefectHQ/fastmcp#1572              (OAuth proxy session state persistence)
+    #   - PrefectHQ/fastmcp#485               (stale session reuse after restart)
     mcp_app = server.http_app(
         transport=server_cfg.transport,
         path=server_cfg.path,
