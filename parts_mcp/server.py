@@ -267,12 +267,19 @@ def _run_http(server: FastMCP, server_cfg: ServerConfig) -> None:
             _mcp_user_sub.reset(reset)
 
     # Get the MCP ASGI app (includes OAuth endpoints when auth is configured)
-    # Enable event_store so SSE connections get priming events — required for
-    # Cloudflare-proxied deployments where unbuffered SSE would otherwise hang.
-    from parts_mcp.events import InMemoryEventStore
-    event_store = InMemoryEventStore()
-
-    mcp_app = server.http_app(transport=server_cfg.transport, path=server_cfg.path, event_store=event_store)
+    # Use stateless_http so each request gets a fresh transport — no session
+    # tracking. This makes redeploys transparent: there are no in-memory
+    # sessions to lose, so clients never get "Session not found" errors.
+    #
+    # Re-evaluate once upstream fixes land:
+    #   - modelcontextprotocol/python-sdk#880  (session persistence / horizontal scaling)
+    #   - anthropics/claude-code#30224         (auto-reconnect SSE MCP after restart)
+    #   - anthropics/claude-code#10129         (auto-reconnect for MCP servers)
+    mcp_app = server.http_app(
+        transport=server_cfg.transport,
+        path=server_cfg.path,
+        stateless_http=True,
+    )
 
     # Mount MCP app under a parent Starlette app that also has /health and /jwks
     app = Starlette(
