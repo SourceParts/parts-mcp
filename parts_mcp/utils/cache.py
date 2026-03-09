@@ -4,6 +4,7 @@ Caching utilities for Parts MCP using diskcache.
 Uses JSONDisk instead of the default pickle-based Disk to avoid
 pickle deserialization vulnerabilities (CVE-2025-69872).
 """
+import asyncio
 import hashlib
 import json
 import logging
@@ -73,30 +74,23 @@ def cached(
         Decorated function
     """
     def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            # Generate cache key using all args
-            # (for methods, the first arg 'self' will be part of key which is fine)
+        def _resolve_key(*args, **kwargs):
             cache_key = make_cache_key(*args, **kwargs)
-
             if key_prefix:
-                cache_key = f"{key_prefix}:{cache_key}"
-            else:
-                cache_key = f"{func.__name__}:{cache_key}"
+                return f"{key_prefix}:{cache_key}"
+            return f"{func.__name__}:{cache_key}"
 
-            # Try to get from cache
+        def _try_get(cache_key):
             try:
                 cached_value = cache.get(cache_key)
                 if cached_value is not None:
                     logger.debug(f"Cache hit for {cache_key}")
-                    return cached_value
+                    return cached_value, True
             except Exception as e:
                 logger.warning(f"Cache get error: {e}")
+            return None, False
 
-            # Call the function
-            result = func(*args, **kwargs)
-
-            # Cache the result if it meets conditions
+        def _try_set(cache_key, result):
             try:
                 if condition is None or condition(result):
                     cache.set(cache_key, result, expire=expire)
@@ -104,9 +98,27 @@ def cached(
             except Exception as e:
                 logger.warning(f"Cache set error: {e}")
 
-            return result
+        if asyncio.iscoroutinefunction(func):
+            @wraps(func)
+            async def wrapper(*args, **kwargs):
+                cache_key = _resolve_key(*args, **kwargs)
+                value, hit = _try_get(cache_key)
+                if hit:
+                    return value
+                result = await func(*args, **kwargs)
+                _try_set(cache_key, result)
+                return result
+        else:
+            @wraps(func)
+            def wrapper(*args, **kwargs):
+                cache_key = _resolve_key(*args, **kwargs)
+                value, hit = _try_get(cache_key)
+                if hit:
+                    return value
+                result = func(*args, **kwargs)
+                _try_set(cache_key, result)
+                return result
 
-        # Add cache management methods
         wrapper.cache_clear = lambda: clear_cache_prefix(
             key_prefix or func.__name__
         )
