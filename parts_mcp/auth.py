@@ -32,6 +32,10 @@ from fastmcp.server.auth.oidc_proxy import OIDCProxy
 
 logger = logging.getLogger(__name__)
 
+# Source Parts branding for all OAuth pages
+_SP_ICON_URL = "https://source.parts/favicon-310x310.png"
+_SP_SERVER_NAME = "Source Parts"
+
 # Auth0 user claims extracted from id_token during OAuth code exchange.
 # Set by SourcePartsOIDCProxy.exchange_authorization_code, read by
 # RS256JWTIssuer.issue_access_token to embed sub/email in the FastMCP JWT.
@@ -431,13 +435,21 @@ class SourcePartsOIDCProxy(OIDCProxy):
         txn_id = request.query_params.get("txn_id")
         if not txn_id:
             return create_secure_html_response(
-                "<h1>Error</h1><p>Invalid or expired transaction</p>", status_code=400
+                _create_branded_error_html(
+                    error_title="Invalid Request",
+                    error_message="Invalid or expired transaction. Please try authenticating again.",
+                ),
+                status_code=400,
             )
 
         txn_model = await self._transaction_store.get(key=txn_id)
         if not txn_model:
             return create_secure_html_response(
-                "<h1>Error</h1><p>Invalid or expired transaction</p>", status_code=400
+                _create_branded_error_html(
+                    error_title="Session Expired",
+                    error_message="Invalid or expired transaction. Please try authenticating again.",
+                ),
+                status_code=400,
             )
 
         txn = txn_model.model_dump()
@@ -541,4 +553,42 @@ class SourcePartsOIDCProxy(OIDCProxy):
             return await super().exchange_authorization_code(client, authorization_code)
         finally:
             _auth0_user_claims.set(None)
+
+
+def _create_branded_error_html(
+    error_title: str,
+    error_message: str,
+    error_details: dict[str, str] | None = None,
+) -> str:
+    """Create a Source Parts branded error page matching the consent page style."""
+    from fastmcp.server.auth.oauth_proxy import create_error_html
+
+    return create_error_html(
+        error_title=error_title,
+        error_message=error_message,
+        error_details=error_details,
+        server_name=_SP_SERVER_NAME,
+        server_icon_url=_SP_ICON_URL,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Monkeypatch upstream error pages to use Source Parts branding
+# ---------------------------------------------------------------------------
+# The OAuth proxy's _handle_idp_callback calls create_error_html() without
+# passing server_name/server_icon_url, resulting in default FastMCP branding.
+# We wrap the function to inject our branding as defaults.
+
+import fastmcp.server.auth.oauth_proxy as _oauth_proxy_mod  # noqa: E402
+
+_orig_create_error_html = _oauth_proxy_mod.create_error_html
+
+
+def _patched_create_error_html(*args, **kwargs):
+    kwargs.setdefault("server_name", _SP_SERVER_NAME)
+    kwargs.setdefault("server_icon_url", _SP_ICON_URL)
+    return _orig_create_error_html(*args, **kwargs)
+
+
+_oauth_proxy_mod.create_error_html = _patched_create_error_html
 
