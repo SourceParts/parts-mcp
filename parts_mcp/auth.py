@@ -523,6 +523,44 @@ class SourcePartsOIDCProxy(OIDCProxy):
         )
         return response
 
+    async def _submit_consent(self, request):
+        """Override to return a graceful 'already authorized' response on retried POSTs.
+
+        Claude.ai retries the consent form POST when it doesn't detect the popup
+        closing after the first successful submission.  The transaction is deleted
+        from the store after the IdP callback completes, so retried POSTs would
+        normally get a 400.  We return a 200 close-window page instead so the
+        popup closes cleanly and Claude.ai stops retrying.
+        """
+        from fastmcp.utilities.ui import create_secure_html_response
+
+        form = await request.form()
+        txn_id = str(form.get("txn_id", ""))
+
+        if txn_id:
+            txn_model = await self._transaction_store.get(key=txn_id)
+            if not txn_model:
+                # Transaction already consumed — auth completed on a previous POST.
+                # Return a page that closes the popup so the client stops retrying.
+                logger.info(
+                    "Consent POST for already-consumed transaction %s — returning close page",
+                    txn_id[:8],
+                )
+                close_html = """
+                    <html><head><title>Authorized</title></head>
+                    <body>
+                        <p>Authorization complete. You may close this window.</p>
+                        <script>
+                            try { window.close(); } catch(e) {}
+                            try { window.opener && window.opener.postMessage('mcp-auth-complete', '*'); } catch(e) {}
+                        </script>
+                    </body></html>
+                """
+                return create_secure_html_response(close_html, status_code=200)
+
+        # Transaction present (or txn_id missing) — delegate to base class.
+        return await super()._submit_consent(request)
+
     async def exchange_authorization_code(self, client, authorization_code):
         """Override to extract Auth0 user identity from id_token before issuing JWT.
 
