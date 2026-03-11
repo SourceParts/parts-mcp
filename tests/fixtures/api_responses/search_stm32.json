@@ -1,0 +1,35 @@
+{
+  "status": "success",
+  "data": {
+    "parts": [
+      {
+        "part_number": "STM32F407VGT6",
+        "manufacturer": "STMicroelectronics",
+        "category": "Microcontrollers",
+        "description": "ARM Cortex-M4 32-bit MCU with FPU, 1MB Flash, 168MHz, LQFP100",
+        "package": "LQFP100",
+        "datasheet_url": "https://www.st.com/resource/en/datasheet/stm32f407vg.pdf"
+      },
+      {
+        "part_number": "STM32F411CEU6",
+        "manufacturer": "STMicroelectronics",
+        "category": "Microcontrollers",
+        "description": "ARM Cortex-M4 32-bit MCU with FPU, 512KB Flash, 100MHz, UFQFPN48",
+        "package": "UFQFPN48",
+        "datasheet_url": "https://www.st.com/resource/en/datasheet/stm32f411ce.pdf"
+      },
+      {
+        "part_number": "STM32F103C8T6",
+        "manufacturer": "STMicroelectronics",
+        "category": "Microcontrollers",
+        "description": "ARM Cortex-M3 32-bit MCU, 64KB Flash, 72MHz, LQFP48",
+        "package": "LQFP48",
+        "datasheet_url": "https://www.st.com/resource/en/datasheet/stm32f103c8.pdf"
+      }
+    ],
+    "total": 45,
+    "limit": 25,
+    "offset": 0,
+    "query": "STM32"
+  }
+}

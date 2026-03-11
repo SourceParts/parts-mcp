@@ -1,0 +1,10 @@
+{
+  "status": "success",
+  "data": {
+    "part_number": "STM32F407VGT6",
+    "quantity": 150,
+    "minimum_quantity": 10,
+    "location": "Bin A-12",
+    "last_updated": "2026-02-07T10:30:00Z"
+  }
+}

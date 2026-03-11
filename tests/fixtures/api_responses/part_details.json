@@ -1,0 +1,24 @@
+{
+  "status": "success",
+  "data": {
+    "part_number": "STM32F407VGT6",
+    "manufacturer": "STMicroelectronics",
+    "category": "Microcontrollers",
+    "description": "ARM Cortex-M4 32-bit MCU with FPU, 1MB Flash, 168MHz, LQFP100",
+    "package": "LQFP100",
+    "pin_count": 100,
+    "specifications": {
+      "core": "ARM Cortex-M4",
+      "flash_size": "1MB",
+      "ram_size": "192KB",
+      "max_frequency": "168MHz",
+      "supply_voltage_min": "1.8V",
+      "supply_voltage_max": "3.6V",
+      "operating_temp_min": "-40C",
+      "operating_temp_max": "85C"
+    },
+    "datasheet_url": "https://www.st.com/resource/en/datasheet/stm32f407vg.pdf",
+    "lifecycle_status": "Active",
+    "rohs_status": "Compliant"
+  }
+}
