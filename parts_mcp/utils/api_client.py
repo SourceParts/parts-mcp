@@ -1449,12 +1449,12 @@ class SourcePartsClient:
                                   base_url=self._get_host_url())
 
     # =========================================================================
-    # Project Endpoints (/api/projects)
+    # Project Endpoints (/v1/projects)
     # =========================================================================
 
     def _project_base_url(self) -> str:
-        """Get the base URL for project endpoints (uses /api/ not /v1/)."""
-        return self._get_host_url() + "/api/"
+        """Get the base URL for project, user, and ECN endpoints."""
+        return self._get_host_url() + "/v1/"
 
     def get_project(self, project_id: str) -> dict[str, Any]:
         """Get a project by ID.
