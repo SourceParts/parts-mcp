@@ -119,7 +119,7 @@ class SourcePartsClient:
             params: Query parameters
             json_data: JSON body data
             retry_count: Number of retries on failure
-            base_url: Override base URL for this request (e.g. for /api/ endpoints)
+            base_url: Override base URL for this request (e.g. for /v1/ endpoints)
 
         Returns:
             API response data
@@ -354,7 +354,7 @@ class SourcePartsClient:
 
             # Response is already unwrapped by _make_request
             # v1 API returns: {"parts": [...], "total": N, "limit": N, "offset": N, "query": "..."}
-            return {
+            result = {
                 'results': response.get('parts', []),
                 'total': response.get('total', len(response.get('parts', []))),
                 'limit': response.get('limit', limit),
@@ -362,6 +362,14 @@ class SourcePartsClient:
                 'query': query,
                 'filters': filters or {}
             }
+
+            # Forward external supplier search status when present
+            if response.get('sync_status'):
+                result['sync_status'] = response['sync_status']
+            if response.get('sync_hint'):
+                result['sync_hint'] = response['sync_hint']
+
+            return result
 
         except Exception as e:
             logger.error(f"Search failed: {e}")
@@ -1428,7 +1436,7 @@ class SourcePartsClient:
             raise SourcePartsAPIError(f"PCB highlight request failed: {e}") from e
 
     # =========================================================================
-    # Docs Endpoints (/api/docs)
+    # Docs Endpoints (/v1/docs)
     # =========================================================================
 
     def get_cli_docs(self, section: str | None = None) -> dict:
