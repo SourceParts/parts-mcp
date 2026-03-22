@@ -168,15 +168,32 @@ def create_server(server_cfg: ServerConfig, auth_cfg: AuthConfig, storage_cfg: S
     register_datasheet_tools(mcp, local_mode=not hosted)
     register_docs_tools(mcp)
 
+    # Render pipeline tools (Blender headless render)
+    from parts_mcp.tools.render import register_render_tools
+    register_render_tools(mcp)
+    logger.info("Registered render pipeline tools")
+
+    # ECN tools are remote-only (API-backed). For local ECN operations,
+    # clients should use the `parts` CLI directly.
+    from parts_mcp.tools.ecn import register_ecn_tools
+    register_ecn_tools(mcp)
+
+    # User profile, preferences, and device management
+    from parts_mcp.tools.preferences import register_preference_tools
+    register_preference_tools(mcp)
+    logger.info("Registered ECN + preference tools")
+
     # Local-only tools require filesystem access — skip in hosted mode
     if not hosted:
+        from parts_mcp.tools.cli import register_cli_tools
         from parts_mcp.tools.kicad import register_kicad_tools
         from parts_mcp.tools.project import register_project_tools
+        register_cli_tools(mcp)
         register_kicad_tools(mcp)
         register_project_tools(mcp)
-        logger.info("Registered local tools (KiCad, project)")
+        logger.info("Registered local tools (CLI, KiCad, project)")
     else:
-        logger.info("Skipped local tools (hosted mode)")
+        logger.info("Skipped local-only tools (hosted mode)")
 
     # Register prompts
     logger.info("Registering prompts...")
@@ -287,8 +304,8 @@ def _run_http(server: FastMCP, server_cfg: ServerConfig) -> None:
     # Mount MCP app under a parent Starlette app that also has /health and /jwks
     app = Starlette(
         routes=[
-            Route("/api/health", health),
-            Route("/api/docs", docs),
+            Route("/v1/health", health),
+            Route("/v1/docs", docs),
             Route("/.well-known/jwks.json", jwks),
         ],
         lifespan=mcp_app.router.lifespan_context,
