@@ -173,15 +173,17 @@ def create_server(server_cfg: ServerConfig, auth_cfg: AuthConfig, storage_cfg: S
     register_render_tools(mcp)
     logger.info("Registered render pipeline tools")
 
-    # ECN tools are remote-only (API-backed). For local ECN operations,
+    # ECN + ECO tools are remote-only (API-backed). For local operations,
     # clients should use the `parts` CLI directly.
     from parts_mcp.tools.ecn import register_ecn_tools
+    from parts_mcp.tools.eco import register_eco_tools
     register_ecn_tools(mcp)
+    register_eco_tools(mcp)
 
     # User profile, preferences, and device management
     from parts_mcp.tools.preferences import register_preference_tools
     register_preference_tools(mcp)
-    logger.info("Registered ECN + preference tools")
+    logger.info("Registered ECN + ECO + preference tools")
 
     # Local-only tools require filesystem access — skip in hosted mode
     if not hosted:
