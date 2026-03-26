@@ -20,6 +20,7 @@ from typing import Any
 from fastmcp import FastMCP
 
 from parts_mcp.utils.api_client import SourcePartsAPIError, get_client, with_user_context
+from parts_mcp.utils.roles import require_role
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +108,7 @@ def register_eco_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     @with_user_context
+    @require_role("admin")
     async def eco_create(
         project_id: str,
         eco_id: str,
@@ -167,6 +169,7 @@ def register_eco_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     @with_user_context
+    @require_role("admin")
     async def eco_update(
         project_id: str,
         eco_id: str,
@@ -231,6 +234,7 @@ def register_eco_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     @with_user_context
+    @require_role("admin")
     async def eco_approve(
         project_id: str,
         eco_id: str,

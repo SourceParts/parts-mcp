@@ -15,6 +15,7 @@ from typing import Any
 from fastmcp import FastMCP
 
 from parts_mcp.utils.api_client import SourcePartsAPIError, get_client, with_user_context
+from parts_mcp.utils.roles import require_role
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +117,7 @@ def register_ecn_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     @with_user_context
+    @require_role("admin")
     async def ecn_create(
         project_id: str,
         ecn_id: str,
@@ -195,6 +197,7 @@ def register_ecn_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     @with_user_context
+    @require_role("admin")
     async def ecn_update(
         project_id: str,
         ecn_id: str,
