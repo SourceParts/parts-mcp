@@ -21,8 +21,33 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Ordered by privilege level
+# Ordered by privilege level (MCP simplified roles)
 ROLES = ("public", "admin", "owner")
+
+# Map MCP roles to the unified proxy/admin-api role system.
+# When the proxy receives an X-MCP-User-Sub header, the user's actual role
+# comes from the DB — this mapping is only for tool gating within the MCP.
+MCP_TO_PROXY_ROLE = {
+    "public": "customer",       # Customers, partners, external users
+    "admin": "employee",        # Source Parts team, authorized partners
+    "owner": "super_admin",     # Source Parts super admins only
+}
+
+# Reverse mapping: proxy roles → MCP role level for tool gating
+PROXY_TO_MCP_ROLE = {
+    "customer": "public",
+    "partner": "public",
+    "employee": "admin",
+    "sales": "admin",
+    "manager": "admin",
+    "admin": "admin",
+    "super_admin": "owner",
+    "ceo": "owner",
+    "consultant": "admin",
+    "internal_consultant": "admin",
+    "investor": "public",
+    "analyst": "admin",
+}
 
 # Cache the user profile per-request to avoid repeated API calls
 _cached_user_profile: ContextVar[dict[str, Any] | None] = ContextVar(
@@ -76,9 +101,18 @@ async def get_user_profile() -> dict[str, Any]:
 
 
 async def get_user_role() -> str:
-    """Get the current user's role."""
+    """Get the current user's MCP role (public/admin/owner).
+
+    If the API returns a proxy-style role (e.g. 'employee', 'super_admin'),
+    map it to the simplified MCP role for tool gating.
+    """
     profile = await get_user_profile()
-    return profile.get("role", "public")
+    raw_role = profile.get("role", "public")
+    # If it's already an MCP role, return as-is
+    if raw_role in ROLES:
+        return raw_role
+    # Map proxy role to MCP role
+    return PROXY_TO_MCP_ROLE.get(raw_role, "public")
 
 
 def require_role(minimum_role: str):
