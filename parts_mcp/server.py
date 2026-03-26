@@ -189,11 +189,13 @@ def create_server(server_cfg: ServerConfig, auth_cfg: AuthConfig, storage_cfg: S
     if not hosted:
         from parts_mcp.tools.cli import register_cli_tools
         from parts_mcp.tools.kicad import register_kicad_tools
+        from parts_mcp.tools.kicad_ctrl import register_kicad_ctrl_tools
         from parts_mcp.tools.project import register_project_tools
         register_cli_tools(mcp)
         register_kicad_tools(mcp)
+        register_kicad_ctrl_tools(mcp)
         register_project_tools(mcp)
-        logger.info("Registered local tools (CLI, KiCad, project)")
+        logger.info("Registered local tools (CLI, KiCad, KiCad-Ctrl, project)")
     else:
         logger.info("Skipped local-only tools (hosted mode)")
 
