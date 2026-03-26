@@ -55,8 +55,167 @@ def _save_pdf(data_b64: str | None, output_dir: str, name: str) -> str | None:
     return out_path
 
 
+def _find_sch_file(project_path: str) -> str:
+    """Find the top-level .kicad_sch file from a project path."""
+    p = Path(project_path)
+    if p.suffix == ".kicad_sch":
+        return str(p)
+    if p.suffix == ".kicad_pro":
+        sch = p.with_suffix(".kicad_sch")
+        if sch.exists():
+            return str(sch)
+    if p.is_dir():
+        schs = list(p.glob("*.kicad_sch"))
+        if schs:
+            return str(schs[0])
+    raise FileNotFoundError(f"No .kicad_sch found at {project_path}")
+
+
 def register_kicad_ctrl_tools(mcp: FastMCP) -> None:
     """Register KiCad-Ctrl pipeline tools with the MCP server."""
+
+    @mcp.tool()
+    @with_user_context
+    @require_role("admin")
+    async def kicad_ctrl_erc(
+        project_path: str,
+    ) -> dict[str, Any]:
+        """Station 0a: Run Electrical Rules Check on the schematic.
+
+        Uploads the .kicad_sch to the API, which runs kicad-cli sch erc
+        and returns a violation report + schematic PDF for review.
+
+        IMPORTANT: Review ERC results before proceeding to netlist diff.
+
+        Args:
+            project_path: Path to .kicad_pro, .kicad_sch, or project directory
+
+        Returns:
+            ERC report with violation counts and schematic PDF path.
+        """
+        try:
+            sch_path = _find_sch_file(project_path)
+            client = get_client()
+
+            with open(sch_path, "rb") as f:
+                sch_data = f.read()
+
+            result = client.upload_file(
+                "eda/erc",
+                file_data=sch_data,
+                filename=os.path.basename(sch_path),
+                content_type="application/octet-stream",
+            )
+
+            # Save schematic PDF locally
+            pdf_path = None
+            if result.get("schematic_pdf"):
+                output_dir = os.path.join(os.path.dirname(sch_path), "eda_ctrl_output")
+                pdf_path = _save_pdf(result["schematic_pdf"], output_dir, "schematic.pdf")
+
+            errors = result.get("error_count", 0)
+            warnings = result.get("warning_count", 0)
+            status = "PASS" if errors == 0 else "FAIL"
+
+            return {
+                "success": True,
+                "status": status,
+                "error_count": errors,
+                "warning_count": warnings,
+                "total_violations": result.get("total_violations", 0),
+                "violations": result.get("violations", [])[:20],
+                "schematic_pdf": pdf_path,
+                "summary": f"ERC {status}: {errors} errors, {warnings} warnings.",
+                "next_step": "Review ERC results. If passing, call kicad_ctrl_netlist_diff to compare connectivity changes."
+                if errors == 0 else "Fix ERC errors in the schematic, then run kicad_ctrl_erc again.",
+            }
+        except Exception as e:
+            return {"error": str(e)}
+
+    @mcp.tool()
+    @with_user_context
+    @require_role("admin")
+    async def kicad_ctrl_netlist_diff(
+        project_path: str,
+        old_schematic: str | None = None,
+    ) -> dict[str, Any]:
+        """Station 0b: Compare old and new schematic netlists.
+
+        Shows what connectivity changed — added/removed/modified nets and
+        components. This tells you exactly which PCB traces need rerouting.
+
+        IMPORTANT: Review the diff before proceeding to PCB analysis.
+
+        Args:
+            project_path: Path to the NEW .kicad_sch (current version)
+            old_schematic: Path to the OLD .kicad_sch (previous version).
+                          If not provided, uses git to find the previous version.
+
+        Returns:
+            Net and component diff with added/removed/changed details.
+        """
+        try:
+            new_sch_path = _find_sch_file(project_path)
+            client = get_client()
+
+            # If no old schematic provided, try git for the previous version
+            if not old_schematic:
+                import subprocess as sp
+                try:
+                    old_content = sp.run(
+                        ["git", "show", f"HEAD~1:{os.path.relpath(new_sch_path)}"],
+                        capture_output=True, text=True,
+                        cwd=os.path.dirname(new_sch_path),
+                    )
+                    if old_content.returncode == 0:
+                        # Write to temp file
+                        old_schematic = new_sch_path + ".old"
+                        with open(old_schematic, "w") as f:
+                            f.write(old_content.stdout)
+                except Exception:
+                    pass
+
+            if not old_schematic or not os.path.exists(old_schematic):
+                return {"error": "Could not find old schematic. Provide --old-schematic path or ensure git history exists."}
+
+            with open(old_schematic, "rb") as f:
+                old_data = f.read()
+            with open(new_sch_path, "rb") as f:
+                new_data = f.read()
+
+            result = client.upload_files(
+                "eda/netlist/diff",
+                files={
+                    "old_file": (os.path.basename(old_schematic), old_data, "application/octet-stream"),
+                    "new_file": (os.path.basename(new_sch_path), new_data, "application/octet-stream"),
+                },
+            )
+
+            nets = result.get("nets", {})
+            comps = result.get("components", {})
+
+            summary_lines = [result.get("summary", "")]
+            if nets.get("changed_detail"):
+                summary_lines.append("\nChanged nets:")
+                for name, info in list(nets["changed_detail"].items())[:10]:
+                    added = info.get("added_connections", [])
+                    removed = info.get("removed_connections", [])
+                    summary_lines.append(f"  {name}: +{len(added)} -{len(removed)} connections")
+
+            return {
+                "success": True,
+                "nets_added": nets.get("added", 0),
+                "nets_removed": nets.get("removed", 0),
+                "nets_changed": nets.get("changed", 0),
+                "components_added": comps.get("added", 0),
+                "components_removed": comps.get("removed", 0),
+                "components_changed": comps.get("changed", 0),
+                "changed_nets": nets.get("changed_detail", {}),
+                "summary": "\n".join(summary_lines),
+                "next_step": "Review connectivity changes. The changed nets are the ones that need PCB rerouting. Call kicad_ctrl_analyze with those net names.",
+            }
+        except Exception as e:
+            return {"error": str(e)}
 
     @mcp.tool()
     @with_user_context
