@@ -185,6 +185,11 @@ def create_server(server_cfg: ServerConfig, auth_cfg: AuthConfig, storage_cfg: S
     register_preference_tools(mcp)
     logger.info("Registered ECN + ECO + preference tools")
 
+    # DFM pipeline tools (both hosted and local — customer-facing + admin)
+    from parts_mcp.tools.dfm_pipeline import register_dfm_pipeline_tools
+    register_dfm_pipeline_tools(mcp)
+    logger.info("Registered DFM pipeline tools")
+
     # Local-only tools require filesystem access — skip in hosted mode
     if not hosted:
         from parts_mcp.tools.cli import register_cli_tools
