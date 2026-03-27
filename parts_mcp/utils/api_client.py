@@ -167,6 +167,20 @@ class SourcePartsClient:
                 elif response.status_code == 403:
                     raise SourcePartsAuthError("Access forbidden - check API permissions")
 
+                # Retry on 502/503/504 (upstream/gateway errors)
+                if response.status_code in (502, 503, 504):
+                    if attempt < retry_count - 1:
+                        wait = 2 ** attempt
+                        logger.warning(
+                            f"Server error {response.status_code}, retry {attempt + 1}/{retry_count} in {wait}s"
+                        )
+                        time.sleep(wait)
+                        continue
+                    raise SourcePartsAPIError(
+                        f"Service unavailable (HTTP {response.status_code}). "
+                        "The API server may be restarting or under maintenance. Please try again in a few minutes."
+                    )
+
                 # Raise for other HTTP errors
                 response.raise_for_status()
 
@@ -277,6 +291,20 @@ class SourcePartsClient:
                     raise SourcePartsAuthError("Invalid API key")
                 elif response.status_code == 403:
                     raise SourcePartsAuthError("Access forbidden - check API permissions")
+
+                # Retry on 502/503/504 (upstream/gateway errors)
+                if response.status_code in (502, 503, 504):
+                    if attempt < retry_count - 1:
+                        wait = 2 ** attempt
+                        logger.warning(
+                            f"Server error {response.status_code}, retry {attempt + 1}/{retry_count} in {wait}s"
+                        )
+                        time.sleep(wait)
+                        continue
+                    raise SourcePartsAPIError(
+                        f"Service unavailable (HTTP {response.status_code}). "
+                        "The API server may be restarting or under maintenance. Please try again in a few minutes."
+                    )
 
                 response.raise_for_status()
 
@@ -1216,6 +1244,20 @@ class SourcePartsClient:
                     raise SourcePartsAuthError("Invalid API key")
                 elif response.status_code == 403:
                     raise SourcePartsAuthError("Access forbidden - check API permissions")
+
+                # Retry on 502/503/504 (upstream/gateway errors)
+                if response.status_code in (502, 503, 504):
+                    if attempt < retry_count - 1:
+                        wait = 2 ** attempt
+                        logger.warning(
+                            f"Server error {response.status_code}, retry {attempt + 1}/{retry_count} in {wait}s"
+                        )
+                        time.sleep(wait)
+                        continue
+                    raise SourcePartsAPIError(
+                        f"Service unavailable (HTTP {response.status_code}). "
+                        "The API server may be restarting or under maintenance. Please try again in a few minutes."
+                    )
 
                 response.raise_for_status()
 
