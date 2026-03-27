@@ -172,6 +172,10 @@ def register_datasheet_tools(mcp: FastMCP, local_mode: bool = True) -> None:
                 "error": "Provide either file_path or sku",
             }
 
+        # Normalize SKU to lowercase for case-insensitive CDN lookup
+        if sku:
+            sku = sku.lower()
+
         try:
             client = get_client()
 
@@ -293,6 +297,10 @@ def register_datasheet_tools(mcp: FastMCP, local_mode: bool = True) -> None:
                 "success": False,
                 "error": "Provide either file_path or sku",
             }
+
+        # Normalize SKU to lowercase for case-insensitive CDN lookup
+        if sku:
+            sku = sku.lower()
 
         try:
             client = get_client()
