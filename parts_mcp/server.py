@@ -201,7 +201,15 @@ def create_server(server_cfg: ServerConfig, auth_cfg: AuthConfig, storage_cfg: S
         register_assembly_pipeline_tools(mcp)
         from parts_mcp.tools.logistics_pipeline import register_logistics_pipeline_tools
         register_logistics_pipeline_tools(mcp)
-        logger.info("Registered local tools (CLI, KiCad, KiCad-Ctrl, Sales, Assembly, Logistics, project)")
+        from parts_mcp.tools.supply_chain_pipeline import register_supply_chain_pipeline_tools
+        register_supply_chain_pipeline_tools(mcp)
+        from parts_mcp.tools.design_pipeline import register_design_pipeline_tools
+        register_design_pipeline_tools(mcp)
+        from parts_mcp.tools.quality_pipeline import register_quality_pipeline_tools
+        register_quality_pipeline_tools(mcp)
+        from parts_mcp.tools.test_pipeline import register_test_pipeline_tools
+        register_test_pipeline_tools(mcp)
+        logger.info("Registered local tools (CLI, KiCad, KiCad-Ctrl, Sales, Assembly, Logistics, Supply Chain, Design, Quality, Test, project)")
     else:
         logger.info("Skipped local-only tools (hosted mode)")
 
