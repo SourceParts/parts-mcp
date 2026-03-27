@@ -199,7 +199,9 @@ def create_server(server_cfg: ServerConfig, auth_cfg: AuthConfig, storage_cfg: S
         register_sales_pipeline_tools(mcp)
         from parts_mcp.tools.assembly_pipeline import register_assembly_pipeline_tools
         register_assembly_pipeline_tools(mcp)
-        logger.info("Registered local tools (CLI, KiCad, KiCad-Ctrl, Sales, Assembly, project)")
+        from parts_mcp.tools.logistics_pipeline import register_logistics_pipeline_tools
+        register_logistics_pipeline_tools(mcp)
+        logger.info("Registered local tools (CLI, KiCad, KiCad-Ctrl, Sales, Assembly, Logistics, project)")
     else:
         logger.info("Skipped local-only tools (hosted mode)")
 
