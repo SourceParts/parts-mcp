@@ -13,6 +13,9 @@ from parts_mcp.utils.api_client import SourcePartsAPIError, get_client, with_use
 logger = logging.getLogger(__name__)
 
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
+MAX_RESPONSE_CHARS = 30_000  # Keep response within MCP context limits
+DEFAULT_MAX_CHUNKS = 5
+MAX_SECTIONS = 200  # Cap for list_datasheet_sections
 
 
 def _tokenize_query(query: str) -> list[str]:
@@ -26,11 +29,21 @@ def _score_text(text: str, keywords: list[str]) -> int:
     return sum(text_lower.count(kw) for kw in keywords)
 
 
-def _filter_chunks(chunks: list[dict], toc: list[dict], query: str) -> tuple[list[dict], dict]:
-    """Filter chunks by query relevance, return matching chunks and savings stats."""
+def _filter_chunks(
+    chunks: list[dict],
+    toc: list[dict],
+    query: str,
+    max_chunks: int = DEFAULT_MAX_CHUNKS,
+    max_chars: int = MAX_RESPONSE_CHARS,
+) -> tuple[list[dict], dict]:
+    """Filter chunks by query relevance, return matching chunks and savings stats.
+
+    Chunks are scored by keyword occurrence, sorted by relevance, then capped
+    by both max_chunks and max_chars to stay within MCP response limits.
+    """
     keywords = _tokenize_query(query)
     if not keywords:
-        return chunks, {}
+        return _cap_chunks(chunks, max_chunks, max_chars)
 
     scored = []
     total_chars = 0
@@ -51,16 +64,74 @@ def _filter_chunks(chunks: list[dict], toc: list[dict], query: str) -> tuple[lis
     scored.sort(key=lambda x: x[0], reverse=True)
     filtered = [chunk for _, chunk in scored]
 
+    # Apply caps
+    truncated = False
+    pre_cap_count = len(filtered)
+    if len(filtered) > max_chunks:
+        filtered = filtered[:max_chunks]
+        truncated = True
+
+    # Enforce character limit
+    capped: list[dict] = []
+    running_chars = 0
+    for chunk in filtered:
+        chunk_len = len(chunk.get("text", ""))
+        if running_chars + chunk_len > max_chars and capped:
+            truncated = True
+            break
+        capped.append(chunk)
+        running_chars += chunk_len
+    filtered = capped
+
     filtered_chars = sum(len(c.get("text", "")) for c in filtered)
     savings = {
         "total_chunks": len(chunks),
+        "matched_chunks": pre_cap_count,
         "returned_chunks": len(filtered),
         "total_chars": total_chars,
         "returned_chars": filtered_chars,
         "reduction_pct": round((1 - filtered_chars / total_chars) * 100, 1) if total_chars else 0,
+        "truncated": truncated,
     }
 
     return filtered, savings
+
+
+def _cap_chunks(
+    chunks: list[dict],
+    max_chunks: int = DEFAULT_MAX_CHUNKS,
+    max_chars: int = MAX_RESPONSE_CHARS,
+) -> tuple[list[dict], dict]:
+    """Cap chunks by count and character limit (no query filtering)."""
+    original_count = len(chunks)
+    total_chars = sum(len(c.get("text", "")) for c in chunks)
+    truncated = False
+
+    limited = chunks[:max_chunks] if len(chunks) > max_chunks else chunks
+    if len(limited) < original_count:
+        truncated = True
+
+    capped: list[dict] = []
+    running_chars = 0
+    for chunk in limited:
+        chunk_len = len(chunk.get("text", ""))
+        if running_chars + chunk_len > max_chars and capped:
+            truncated = True
+            break
+        capped.append(chunk)
+        running_chars += chunk_len
+
+    capped_chars = sum(len(c.get("text", "")) for c in capped)
+    savings = {
+        "total_chunks": original_count,
+        "returned_chunks": len(capped),
+        "total_chars": total_chars,
+        "returned_chars": capped_chars,
+        "reduction_pct": round((1 - capped_chars / total_chars) * 100, 1) if total_chars else 0,
+        "truncated": truncated,
+    }
+
+    return capped, savings
 
 
 def register_datasheet_tools(mcp: FastMCP, local_mode: bool = True) -> None:
@@ -73,6 +144,7 @@ def register_datasheet_tools(mcp: FastMCP, local_mode: bool = True) -> None:
         sku: str | None = None,
         query: str | None = None,
         chunk_pages: int = 5,
+        max_chunks: int = DEFAULT_MAX_CHUNKS,
     ) -> dict[str, Any]:
         """Read and chunk a datasheet PDF for analysis.
 
@@ -89,6 +161,7 @@ def register_datasheet_tools(mcp: FastMCP, local_mode: bool = True) -> None:
             sku: Part SKU to fetch cached chunks for
             query: Optional keywords to filter chunks (e.g. "maximum input voltage")
             chunk_pages: Pages per chunk (default 5)
+            max_chunks: Maximum chunks to return (default 5). Increase for broader results.
 
         Returns:
             Chunked datasheet text with TOC and metadata
@@ -148,17 +221,40 @@ def register_datasheet_tools(mcp: FastMCP, local_mode: bool = True) -> None:
             }
 
             if query:
-                filtered, savings = _filter_chunks(chunks, toc, query)
+                filtered, savings = _filter_chunks(
+                    chunks, toc, query,
+                    max_chunks=max_chunks,
+                    max_chars=MAX_RESPONSE_CHARS,
+                )
                 response["chunks"] = filtered
                 response["query"] = query
                 response["context_savings"] = savings
-                response["message"] = (
+                msg = (
                     f"{savings['returned_chunks']} of {savings['total_chunks']} chunks "
                     f"match query ({savings['reduction_pct']}% reduction)"
                 )
+                if savings.get("truncated"):
+                    msg += (
+                        f". Results were truncated to stay within response limits "
+                        f"(matched {savings.get('matched_chunks', '?')} chunks). "
+                        f"Narrow your query or increase max_chunks for different results."
+                    )
+                response["message"] = msg
             else:
-                response["chunks"] = chunks
-                response["message"] = f"{len(chunks)} chunks from {source}"
+                capped, savings = _cap_chunks(
+                    chunks,
+                    max_chunks=max_chunks,
+                    max_chars=MAX_RESPONSE_CHARS,
+                )
+                response["chunks"] = capped
+                response["context_savings"] = savings
+                msg = f"{savings['returned_chunks']} of {savings['total_chunks']} chunks from {source}"
+                if savings.get("truncated"):
+                    msg += (
+                        ". Results were truncated to stay within response limits. "
+                        "Use a query to filter for specific content, or increase max_chunks."
+                    )
+                response["message"] = msg
 
             return response
 
@@ -237,14 +333,26 @@ def register_datasheet_tools(mcp: FastMCP, local_mode: bool = True) -> None:
                 source = sku
 
             toc = result.get("toc", [])
+            total_sections = len(toc)
+            truncated = False
+
+            if total_sections > MAX_SECTIONS:
+                toc = toc[:MAX_SECTIONS]
+                truncated = True
+
+            msg = f"{total_sections} sections found in {source}" if toc else f"No TOC detected in {source}"
+            if truncated:
+                msg += f" (showing first {MAX_SECTIONS} of {total_sections})"
 
             return {
                 "success": True,
                 "source": source,
                 "total_pages": result.get("total_pages"),
                 "sections": toc,
-                "section_count": len(toc),
-                "message": f"{len(toc)} sections found in {source}" if toc else f"No TOC detected in {source}",
+                "section_count": total_sections,
+                "returned_sections": len(toc),
+                "truncated": truncated,
+                "message": msg,
             }
 
         except SourcePartsAPIError as e:
