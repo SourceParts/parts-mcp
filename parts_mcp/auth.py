@@ -626,77 +626,68 @@ def _create_success_html(callback_url: str) -> str:
     "Authentication Successful" page.
 
     Instead we serve this branded page on mcp.source.parts, then redirect the
-    browser to localhost via JavaScript so Claude Code still receives the code.
+    browser to localhost via a <meta http-equiv="refresh"> in <head> so Claude Code
+    still receives the code.
+
+    We write the full HTML ourselves (rather than using create_page) so that the
+    meta-refresh lives in <head> — its proper location — and we can use a tight CSP
+    with no script-src at all.  Meta-refresh is a navigation, not a script or
+    resource fetch, so it is not blocked by default-src 'none'.
     """
     import html as html_module
 
-    from fastmcp.utilities.ui import (
-        BUTTON_STYLES,
-        create_logo,
-        create_page,
-    )
+    from fastmcp.utilities.ui import BASE_STYLES, BUTTON_STYLES
 
     callback_url_escaped = html_module.escape(callback_url, quote=True)
 
-    # JS redirect runs immediately; meta-refresh is a fallback for no-JS browsers.
-    redirect_script = f"""
-        <script>
-            window.location.replace("{callback_url_escaped}");
-        </script>
-        <noscript>
-            <meta http-equiv="refresh" content="0;url={callback_url_escaped}">
-        </noscript>
-    """
-
-    content = f"""
-        {redirect_script}
-        <div class="container">
-            {create_logo(icon_url=_SP_ICON_URL, alt_text="Source Parts")}
-            <h1>&#10003; Authentication Successful</h1>
-            <div class="info-box">
-                <p>You can close this tab and return to your terminal.</p>
-                <p>Your credentials have been saved securely to your system keychain.</p>
-            </div>
-            <div class="button-group">
-                <a href="{callback_url_escaped}" class="btn-approve" style="text-decoration:none;display:inline-block;">Return to Terminal</a>
-            </div>
-        </div>
-    """
-
-    additional_styles = BUTTON_STYLES + """
-        .container { text-align: center; }
-        .info-box {
-            background: #f0f9f0;
-            border: 1px solid #c3e6c3;
-            border-radius: 6px;
-            padding: 16px 20px;
-            margin: 16px 0;
-            color: #1a4a1a;
-            text-align: center;
-        }
-        .info-box p { margin: 6px 0; }
-        h1 { color: #2d6a2d; }
-        .button-group { justify-content: center; }
-    """
-
-    # Allow script-src 'unsafe-inline' for the JS redirect to localhost.
-    # Also allow navigating to http://localhost:* (script navigation isn't
-    # governed by form-action; it's governed by script-src).
-    csp_policy = (
+    # CSP: no scripts, no forms, images only from https.
+    # script-src is intentionally absent — meta-refresh does not need it.
+    csp = (
         "default-src 'none'; "
         "style-src 'unsafe-inline'; "
-        "script-src 'unsafe-inline'; "
         "img-src https: data:; "
         "base-uri 'none'; "
         "form-action 'none'"
     )
 
-    return create_page(
-        content=content,
-        title="Authentication Successful — Source Parts",
-        additional_styles=additional_styles,
-        csp_policy=csp_policy,
-    )
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="{html_module.escape(csp, quote=True)}">
+    <meta http-equiv="refresh" content="0;url={callback_url_escaped}">
+    <title>Authentication Successful — Source Parts</title>
+    <style>
+        {BASE_STYLES}
+        {BUTTON_STYLES}
+        .info-box {{
+            background: #f0f9f0;
+            border: 1px solid #c3e6c3;
+            border-radius: 0.5rem;
+            padding: 1rem 1.25rem;
+            margin: 1.5rem 0;
+            color: #1a4a1a;
+        }}
+        .info-box p {{ margin: 0.375rem 0; font-size: 0.9375rem; }}
+        h1 {{ color: #2d6a2d; }}
+        .btn-approve {{ text-decoration: none; display: inline-flex; align-items: center; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <img src="{html_module.escape(_SP_ICON_URL, quote=True)}" alt="Source Parts" class="logo">
+        <h1>&#10003; Authentication Successful</h1>
+        <div class="info-box">
+            <p>You can close this tab and return to your terminal.</p>
+            <p>Your credentials have been saved securely to your system keychain.</p>
+        </div>
+        <div class="button-group">
+            <a href="{callback_url_escaped}" class="btn-approve">Return to Terminal</a>
+        </div>
+    </div>
+</body>
+</html>"""
 
 
 def _create_branded_error_html(
