@@ -592,6 +592,112 @@ class SourcePartsOIDCProxy(OIDCProxy):
         finally:
             _auth0_user_claims.set(None)
 
+    async def _handle_idp_callback(self, request):
+        """Override to show a branded success page before redirecting to the local callback.
+
+        The base implementation does a 302 directly to Claude Code's localhost
+        callback server, which then shows a bare 'Authentication Successful' page.
+        We intercept the redirect, extract the destination URL, and instead return
+        a branded HTML page that JS-redirects the browser to localhost so Claude
+        Code still receives the authorization code.
+        """
+        from starlette.responses import RedirectResponse
+        from fastmcp.utilities.ui import create_secure_html_response
+
+        response = await super()._handle_idp_callback(request)
+
+        # Only intercept successful redirects to localhost (Claude Code callback).
+        # Leave error redirects (data: URLs) and non-localhost URLs unchanged.
+        if isinstance(response, RedirectResponse):
+            location = response.headers.get("location", "")
+            if "localhost" in location or "127.0.0.1" in location:
+                logger.info("Serving branded success page before localhost callback redirect")
+                return create_secure_html_response(_create_success_html(callback_url=location))
+
+        return response
+
+
+def _create_success_html(callback_url: str) -> str:
+    """Branded 'Authentication Successful' page that auto-redirects to the local callback.
+
+    Claude Code runs a local HTTP server (e.g. http://localhost:58560/callback) to
+    receive the OAuth authorization code.  The base OIDCProxy would do a plain 302
+    to that URL, causing the browser to hit localhost and show Claude Code's bare
+    "Authentication Successful" page.
+
+    Instead we serve this branded page on mcp.source.parts, then redirect the
+    browser to localhost via JavaScript so Claude Code still receives the code.
+    """
+    import html as html_module
+
+    from fastmcp.utilities.ui import (
+        BUTTON_STYLES,
+        create_logo,
+        create_page,
+    )
+
+    callback_url_escaped = html_module.escape(callback_url, quote=True)
+
+    # JS redirect runs immediately; meta-refresh is a fallback for no-JS browsers.
+    redirect_script = f"""
+        <script>
+            window.location.replace("{callback_url_escaped}");
+        </script>
+        <noscript>
+            <meta http-equiv="refresh" content="0;url={callback_url_escaped}">
+        </noscript>
+    """
+
+    content = f"""
+        {redirect_script}
+        <div class="container">
+            {create_logo(icon_url=_SP_ICON_URL, alt_text="Source Parts")}
+            <h1>&#10003; Authentication Successful</h1>
+            <div class="info-box">
+                <p>You can close this tab and return to your terminal.</p>
+                <p>Your credentials have been saved securely to your system keychain.</p>
+            </div>
+            <div class="button-group">
+                <a href="{callback_url_escaped}" class="btn-approve" style="text-decoration:none;display:inline-block;">Return to Terminal</a>
+            </div>
+        </div>
+    """
+
+    additional_styles = BUTTON_STYLES + """
+        .container { text-align: center; }
+        .info-box {
+            background: #f0f9f0;
+            border: 1px solid #c3e6c3;
+            border-radius: 6px;
+            padding: 16px 20px;
+            margin: 16px 0;
+            color: #1a4a1a;
+            text-align: center;
+        }
+        .info-box p { margin: 6px 0; }
+        h1 { color: #2d6a2d; }
+        .button-group { justify-content: center; }
+    """
+
+    # Allow script-src 'unsafe-inline' for the JS redirect to localhost.
+    # Also allow navigating to http://localhost:* (script navigation isn't
+    # governed by form-action; it's governed by script-src).
+    csp_policy = (
+        "default-src 'none'; "
+        "style-src 'unsafe-inline'; "
+        "script-src 'unsafe-inline'; "
+        "img-src https: data:; "
+        "base-uri 'none'; "
+        "form-action 'none'"
+    )
+
+    return create_page(
+        content=content,
+        title="Authentication Successful — Source Parts",
+        additional_styles=additional_styles,
+        csp_policy=csp_policy,
+    )
+
 
 def _create_branded_error_html(
     error_title: str,
