@@ -74,7 +74,7 @@ def register_sourcing_tools(mcp: FastMCP) -> None:
                         unit_price = pb.get('unit_price')
 
                 if unit_price is not None:
-                    source = part_data.get('metadata', {}).get('external_source', 'Source Parts')
+                    source = (part_data.get('metadata') or {}).get('external_source', 'Source Parts')
                     prices.append({
                         'supplier': source.upper() if source != 'Source Parts' else source,
                         'sku': sku,
@@ -165,7 +165,7 @@ def register_sourcing_tools(mcp: FastMCP) -> None:
                     # The API returns stock_quantity directly on the product,
                     # not a suppliers array. Read it from the search result.
                     total_stock = part_data.get('stock_quantity', 0) or 0
-                    source = part_data.get('metadata', {}).get('external_source', 'Source Parts')
+                    source = (part_data.get('metadata') or {}).get('external_source', 'Source Parts')
 
                     in_stock_suppliers = []
                     if total_stock >= qty_needed:

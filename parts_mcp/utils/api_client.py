@@ -119,7 +119,7 @@ class SourcePartsClient:
             params: Query parameters
             json_data: JSON body data
             retry_count: Number of retries on failure
-            base_url: Override base URL for this request (e.g. for /api/ endpoints)
+            base_url: Override base URL for this request (e.g. for /v1/ endpoints)
 
         Returns:
             API response data
@@ -166,6 +166,20 @@ class SourcePartsClient:
                     raise SourcePartsAuthError("Invalid API key")
                 elif response.status_code == 403:
                     raise SourcePartsAuthError("Access forbidden - check API permissions")
+
+                # Retry on 502/503/504 (upstream/gateway errors)
+                if response.status_code in (502, 503, 504):
+                    if attempt < retry_count - 1:
+                        wait = 2 ** attempt
+                        logger.warning(
+                            f"Server error {response.status_code}, retry {attempt + 1}/{retry_count} in {wait}s"
+                        )
+                        time.sleep(wait)
+                        continue
+                    raise SourcePartsAPIError(
+                        f"Service unavailable (HTTP {response.status_code}). "
+                        "The API server may be restarting or under maintenance. Please try again in a few minutes."
+                    )
 
                 # Raise for other HTTP errors
                 response.raise_for_status()
@@ -278,6 +292,20 @@ class SourcePartsClient:
                 elif response.status_code == 403:
                     raise SourcePartsAuthError("Access forbidden - check API permissions")
 
+                # Retry on 502/503/504 (upstream/gateway errors)
+                if response.status_code in (502, 503, 504):
+                    if attempt < retry_count - 1:
+                        wait = 2 ** attempt
+                        logger.warning(
+                            f"Server error {response.status_code}, retry {attempt + 1}/{retry_count} in {wait}s"
+                        )
+                        time.sleep(wait)
+                        continue
+                    raise SourcePartsAPIError(
+                        f"Service unavailable (HTTP {response.status_code}). "
+                        "The API server may be restarting or under maintenance. Please try again in a few minutes."
+                    )
+
                 response.raise_for_status()
 
                 raw_response = response.json()
@@ -354,7 +382,7 @@ class SourcePartsClient:
 
             # Response is already unwrapped by _make_request
             # v1 API returns: {"parts": [...], "total": N, "limit": N, "offset": N, "query": "..."}
-            return {
+            result = {
                 'results': response.get('parts', []),
                 'total': response.get('total', len(response.get('parts', []))),
                 'limit': response.get('limit', limit),
@@ -362,6 +390,14 @@ class SourcePartsClient:
                 'query': query,
                 'filters': filters or {}
             }
+
+            # Forward external supplier search status when present
+            if response.get('sync_status'):
+                result['sync_status'] = response['sync_status']
+            if response.get('sync_hint'):
+                result['sync_hint'] = response['sync_hint']
+
+            return result
 
         except Exception as e:
             logger.error(f"Search failed: {e}")
@@ -1209,6 +1245,20 @@ class SourcePartsClient:
                 elif response.status_code == 403:
                     raise SourcePartsAuthError("Access forbidden - check API permissions")
 
+                # Retry on 502/503/504 (upstream/gateway errors)
+                if response.status_code in (502, 503, 504):
+                    if attempt < retry_count - 1:
+                        wait = 2 ** attempt
+                        logger.warning(
+                            f"Server error {response.status_code}, retry {attempt + 1}/{retry_count} in {wait}s"
+                        )
+                        time.sleep(wait)
+                        continue
+                    raise SourcePartsAPIError(
+                        f"Service unavailable (HTTP {response.status_code}). "
+                        "The API server may be restarting or under maintenance. Please try again in a few minutes."
+                    )
+
                 response.raise_for_status()
 
                 raw_response = response.json()
@@ -1570,7 +1620,7 @@ class SourcePartsClient:
             raise SourcePartsAPIError(f"Allegro conversion request failed: {e}") from e
 
     # =========================================================================
-    # Docs Endpoints (/api/docs)
+    # Docs Endpoints (/v1/docs)
     # =========================================================================
 
     def get_cli_docs(self, section: str | None = None) -> dict:
@@ -1591,12 +1641,12 @@ class SourcePartsClient:
                                   base_url=self._get_host_url())
 
     # =========================================================================
-    # Project Endpoints (/api/projects)
+    # Project Endpoints (/v1/projects)
     # =========================================================================
 
     def _project_base_url(self) -> str:
-        """Get the base URL for project endpoints (uses /api/ not /v1/)."""
-        return self._get_host_url() + "/api/"
+        """Get the base URL for project, user, and ECN endpoints."""
+        return self._get_host_url() + "/v1/"
 
     def get_project(self, project_id: str) -> dict[str, Any]:
         """Get a project by ID.

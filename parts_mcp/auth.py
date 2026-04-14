@@ -546,17 +546,9 @@ class SourcePartsOIDCProxy(OIDCProxy):
                     "Consent POST for already-consumed transaction %s — returning close page",
                     txn_id[:8],
                 )
-                close_html = """
-                    <html><head><title>Authorized</title></head>
-                    <body>
-                        <p>Authorization complete. You may close this window.</p>
-                        <script>
-                            try { window.close(); } catch(e) {}
-                            try { window.opener && window.opener.postMessage('mcp-auth-complete', '*'); } catch(e) {}
-                        </script>
-                    </body></html>
-                """
-                return create_secure_html_response(close_html, status_code=200)
+                return create_secure_html_response(
+                    _create_branded_success_close_html(), status_code=200
+                )
 
         # Transaction present (or txn_id missing) — delegate to base class.
         return await super()._submit_consent(request)
@@ -592,41 +584,235 @@ class SourcePartsOIDCProxy(OIDCProxy):
         finally:
             _auth0_user_claims.set(None)
 
+    async def _handle_idp_callback(self, request):
+        """Override to show a branded success page before redirecting to the local callback.
+
+        The base implementation does a 302 directly to Claude Code's localhost
+        callback server, which then shows a bare 'Authentication Successful' page.
+        We intercept the redirect, extract the destination URL, and instead return
+        a branded HTML page that JS-redirects the browser to localhost so Claude
+        Code still receives the authorization code.
+        """
+        from starlette.responses import RedirectResponse
+        from fastmcp.utilities.ui import create_secure_html_response
+
+        response = await super()._handle_idp_callback(request)
+
+        # Only intercept successful redirects to localhost (Claude Code callback).
+        # Leave error redirects (data: URLs) and non-localhost URLs unchanged.
+        if isinstance(response, RedirectResponse):
+            location = response.headers.get("location", "")
+            if "localhost" in location or "127.0.0.1" in location:
+                logger.info("Serving branded success page before localhost callback redirect")
+                return create_secure_html_response(_create_success_html(callback_url=location))
+            elif location.startswith("data:"):
+                logger.warning("IdP callback error — showing branded error page")
+                return create_secure_html_response(
+                    _create_branded_error_html(
+                        error_title="Authentication Failed",
+                        error_message="An error occurred during sign-in. Please close this window and try again.",
+                    )
+                )
+
+        return response
+
+
+def _create_success_html(callback_url: str) -> str:
+    """Branded 'Authentication Successful' page that auto-redirects to the local callback.
+
+    Claude Code runs a local HTTP server (e.g. http://localhost:58560/callback) to
+    receive the OAuth authorization code.  The base OIDCProxy would do a plain 302
+    to that URL, causing the browser to hit localhost and show Claude Code's bare
+    "Authentication Successful" page.
+
+    Instead we serve this branded page on mcp.source.parts, then redirect the
+    browser to localhost via a <meta http-equiv="refresh"> in <head> so Claude Code
+    still receives the code.
+
+    We write the full HTML ourselves (rather than using create_page) so that the
+    meta-refresh lives in <head> — its proper location — and we can use a tight CSP
+    with no script-src at all.  Meta-refresh is a navigation, not a script or
+    resource fetch, so it is not blocked by default-src 'none'.
+    """
+    import html as html_module
+
+    from fastmcp.utilities.ui import BASE_STYLES, BUTTON_STYLES
+
+    callback_url_escaped = html_module.escape(callback_url, quote=True)
+
+    # CSP: no scripts, no forms, images only from https.
+    # script-src is intentionally absent — meta-refresh does not need it.
+    csp = (
+        "default-src 'none'; "
+        "style-src 'unsafe-inline'; "
+        "img-src https: data:; "
+        "base-uri 'none'; "
+        "form-action 'none'"
+    )
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="{html_module.escape(csp, quote=True)}">
+    <meta http-equiv="refresh" content="0;url={callback_url_escaped}">
+    <title>Authentication Successful — Source Parts</title>
+    <style>
+        {BASE_STYLES}
+        {BUTTON_STYLES}
+        .info-box {{
+            background: #f0f9f0;
+            border: 1px solid #c3e6c3;
+            border-radius: 0.5rem;
+            padding: 1rem 1.25rem;
+            margin: 1.5rem 0;
+            color: #1a4a1a;
+        }}
+        .info-box p {{ margin: 0.375rem 0; font-size: 0.9375rem; }}
+        h1 {{ color: #2d6a2d; }}
+        .btn-approve {{ text-decoration: none; display: inline-flex; align-items: center; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <img src="{html_module.escape(_SP_ICON_URL, quote=True)}" alt="Source Parts" class="logo">
+        <h1>&#10003; Authentication Successful</h1>
+        <div class="info-box">
+            <p>You can close this tab and return to your terminal.</p>
+            <p>Your credentials have been saved securely to your system keychain.</p>
+        </div>
+        <div class="button-group">
+            <a href="{callback_url_escaped}" class="btn-approve">Return to Terminal</a>
+        </div>
+    </div>
+</body>
+</html>"""
+
 
 def _create_branded_error_html(
     error_title: str,
     error_message: str,
     error_details: dict[str, str] | None = None,
 ) -> str:
-    """Create a Source Parts branded error page matching the consent page style."""
-    from fastmcp.server.auth.oauth_proxy import create_error_html
+    """Create a self-contained Source Parts branded error page."""
+    import html as html_module
 
-    return create_error_html(
-        error_title=error_title,
-        error_message=error_message,
-        error_details=error_details,
-        server_name=_SP_SERVER_NAME,
-        server_icon_url=_SP_ICON_URL,
+    from fastmcp.utilities.ui import BASE_STYLES
+
+    title_escaped = html_module.escape(error_title)
+    message_escaped = html_module.escape(error_message)
+
+    csp = (
+        "default-src 'none'; "
+        "style-src 'unsafe-inline'; "
+        "img-src https: data:; "
+        "base-uri 'none'; "
+        "form-action 'none'"
     )
 
+    details_html = ""
+    if error_details:
+        rows = "\n".join(
+            f"""<div class="detail-row">
+                    <div class="detail-label">{html_module.escape(k)}:</div>
+                    <div class="detail-value">{html_module.escape(v)}</div>
+                </div>"""
+            for k, v in error_details.items()
+        )
+        details_html = f'<div class="detail-box" style="margin-top:1rem">{rows}</div>'
 
-# ---------------------------------------------------------------------------
-# Monkeypatch upstream error pages to use Source Parts branding
-# ---------------------------------------------------------------------------
-# The OAuth proxy's _handle_idp_callback calls create_error_html() without
-# passing server_name/server_icon_url, resulting in default FastMCP branding.
-# We wrap the function to inject our branding as defaults.
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="{html_module.escape(csp, quote=True)}">
+    <title>{title_escaped} — Source Parts</title>
+    <style>
+        {BASE_STYLES}
+        .error-box {{
+            background: #fdf0f0;
+            border: 1px solid #e6c3c3;
+            border-radius: 0.5rem;
+            padding: 1rem 1.25rem;
+            margin: 1.5rem 0;
+            color: #4a1a1a;
+        }}
+        .error-box p {{ margin: 0.375rem 0; font-size: 0.9375rem; }}
+        h1 {{ color: #8b2020; }}
+        .detail-box {{ background: #f8f8f8; border: 1px solid #ddd; border-radius: 0.5rem; padding: 0.75rem 1rem; }}
+        .detail-row {{ display: flex; gap: 1rem; padding: 0.25rem 0; font-size: 0.875rem; }}
+        .detail-label {{ font-weight: 600; min-width: 8rem; color: #555; }}
+        .detail-value {{ color: #333; word-break: break-all; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <img src="{html_module.escape(_SP_ICON_URL, quote=True)}" alt="Source Parts" class="logo">
+        <h1>&#10007; {title_escaped}</h1>
+        <div class="error-box">
+            <p>{message_escaped}</p>
+        </div>
+        {details_html}
+    </div>
+</body>
+</html>"""
 
-import fastmcp.server.auth.oauth_proxy as _oauth_proxy_mod  # noqa: E402
 
-_orig_create_error_html = _oauth_proxy_mod.create_error_html
+def _create_branded_success_close_html() -> str:
+    """Branded 'Authorization complete' close-popup page for retried consent POSTs.
 
+    Like _create_success_html but without meta-refresh — used when the popup
+    needs to close itself after auth already completed on a previous POST.
+    Keeps window.close() and postMessage JS so the popup dismisses cleanly.
+    """
+    import html as html_module
 
-def _patched_create_error_html(*args, **kwargs):
-    kwargs.setdefault("server_name", _SP_SERVER_NAME)
-    kwargs.setdefault("server_icon_url", _SP_ICON_URL)
-    return _orig_create_error_html(*args, **kwargs)
+    from fastmcp.utilities.ui import BASE_STYLES, BUTTON_STYLES
 
+    csp = (
+        "default-src 'none'; "
+        "style-src 'unsafe-inline'; "
+        "script-src 'unsafe-inline'; "
+        "img-src https: data:; "
+        "base-uri 'none'"
+    )
 
-_oauth_proxy_mod.create_error_html = _patched_create_error_html
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="{html_module.escape(csp, quote=True)}">
+    <title>Authorization Complete — Source Parts</title>
+    <style>
+        {BASE_STYLES}
+        {BUTTON_STYLES}
+        .info-box {{
+            background: #f0f9f0;
+            border: 1px solid #c3e6c3;
+            border-radius: 0.5rem;
+            padding: 1rem 1.25rem;
+            margin: 1.5rem 0;
+            color: #1a4a1a;
+        }}
+        .info-box p {{ margin: 0.375rem 0; font-size: 0.9375rem; }}
+        h1 {{ color: #2d6a2d; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <img src="{html_module.escape(_SP_ICON_URL, quote=True)}" alt="Source Parts" class="logo">
+        <h1>&#10003; Authorization Complete</h1>
+        <div class="info-box">
+            <p>You can close this window and return to your terminal.</p>
+        </div>
+    </div>
+    <script>
+        try {{ window.close(); }} catch(e) {{}}
+        try {{ window.opener && window.opener.postMessage('mcp-auth-complete', '*'); }} catch(e) {{}}
+    </script>
+</body>
+</html>"""
 

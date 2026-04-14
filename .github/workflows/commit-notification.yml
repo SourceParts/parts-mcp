@@ -1,0 +1,70 @@
+name: Parts MCP - Commit Email Notification
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - develop
+    # Ignore commits from GitHub Actions bot to prevent loops
+    tags-ignore:
+      - '**'
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+
+    # Don't run if the commit message contains [skip-notify] or [no-notify]
+    if: |
+      !contains(github.event.head_commit.message, '[skip-notify]') &&
+      !contains(github.event.head_commit.message, '[no-notify]') &&
+      github.actor != 'github-actions[bot]'
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            scripts/send-commit-notification.ts
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install tsx
+        run: npm install -g tsx
+
+      - name: Send Email Notification
+        env:
+          # GitHub API key for authentication with our endpoint
+          GITHUB_API_KEY: ${{ secrets.NOTIFICATION_API_KEY }}
+          # Commit details from GitHub context
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+          COMMIT_SHA: ${{ github.sha }}
+          COMMIT_URL: ${{ github.event.head_commit.url }}
+          AUTHOR_NAME: ${{ github.event.head_commit.author.name }}
+          AUTHOR_EMAIL: ${{ github.event.head_commit.author.email }}
+          REPOSITORY: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+          TIMESTAMP: ${{ github.event.head_commit.timestamp }}
+          # Add service identifier
+          SERVICE_NAME: "Parts MCP"
+          SERVICE_EMOJI: "🤖"
+        run: tsx scripts/send-commit-notification.ts
+
+      - name: Log Notification Status
+        if: always()
+        run: |
+          if [ "${{ job.status }}" == "success" ]; then
+            echo "✅ Parts MCP email notification sent successfully"
+            echo "📧 Recipients: nick@sourceparts.eu, jose@source.parts"
+            echo "🤖 Service: Parts MCP"
+            echo "📋 Commit: ${{ github.event.head_commit.message }}"
+          else
+            echo "⚠️ Failed to send Parts MCP email notification"
+            echo "💡 Tips:"
+            echo "  - Check that NOTIFICATION_API_KEY is set in GitHub Secrets"
+            echo "  - Ensure the API endpoint is deployed and working"
+            echo "  - Verify RESEND_API_KEY and GITHUB_API_KEY are set in Vercel"
+          fi
