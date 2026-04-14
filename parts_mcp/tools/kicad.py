@@ -345,6 +345,63 @@ def register_kicad_tools(mcp: FastMCP) -> None:
         }
 
     @mcp.tool()
+    async def convert_allegro(
+        file_path: str,
+        output_path: str | None = None,
+    ) -> dict[str, Any]:
+        """Convert a Cadence Allegro PCB board file to KiCad format.
+
+        Imports a Cadence Allegro .brd binary file (versions 16-23) and
+        converts it to a KiCad .kicad_pcb file. Uses KiCad 10's built-in
+        Allegro importer — no Cadence software required.
+
+        Board files only. Schematics are not supported. The .brd extension
+        is also used by Eagle; KiCad auto-detects the format via magic bytes.
+
+        Output is a ZIP archive containing the .kicad_pcb file and any
+        extracted footprint libraries.
+
+        Args:
+            file_path: Path to Allegro .brd file or zip archive
+            output_path: Where to save the output ZIP (default: <stem>_kicad.zip next to input)
+
+        Returns:
+            Dict with success, output_path, source_file, and output_size_bytes
+        """
+        path = Path(file_path).expanduser().resolve()
+        if not path.exists():
+            return {"success": False, "error": f"File not found: {file_path}"}
+
+        ext = path.suffix.lower()
+        if ext not in (".brd", ".zip"):
+            return {"success": False, "error": f"Expected .brd or .zip file, got {ext}"}
+
+        file_data = path.read_bytes()
+
+        try:
+            client = get_client()
+            result_bytes = client.convert_allegro(
+                file_data=file_data,
+                filename=path.name,
+            )
+        except SourcePartsAPIError as e:
+            return {"success": False, "error": str(e)}
+
+        if output_path:
+            out = Path(output_path).expanduser().resolve()
+        else:
+            out = path.with_name(f"{path.stem}_kicad.zip")
+
+        out.write_bytes(result_bytes)
+
+        return {
+            "success": True,
+            "output_path": str(out),
+            "source_file": str(path),
+            "output_size_bytes": len(result_bytes),
+        }
+
+    @mcp.tool()
     async def export_parts_to_kicad(
         parts: list[dict[str, Any]],
         output_path: str,
