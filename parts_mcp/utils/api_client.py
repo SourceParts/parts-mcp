@@ -1427,6 +1427,77 @@ class SourcePartsClient:
         except (TimeoutException, RequestError) as e:
             raise SourcePartsAPIError(f"PCB highlight request failed: {e}") from e
 
+    def convert_kicad_version(
+        self,
+        file_data: bytes,
+        filename: str,
+        target_version: str,
+    ) -> bytes:
+        """Downconvert a KiCad file from version 10 to an older version.
+
+        Sends .kicad_pcb, .kicad_sch, or project ZIP to /v1/convert/kicad/version
+        and returns the converted file bytes.
+
+        Args:
+            file_data: Raw file bytes
+            filename: Original filename (determines response MIME type)
+            target_version: Target version string: "7", "8", or "9"
+
+        Returns:
+            Converted file as raw bytes
+
+        Raises:
+            SourcePartsAPIError: On API errors
+        """
+        logger.info(f"Converting {filename} to KiCad {target_version}")
+
+        base = self.base_url if self.base_url.endswith('/') else self.base_url + '/'
+        url = urljoin(base, 'convert/kicad/version')
+
+        self._rate_limit()
+
+        extra_headers = {}
+        user_sub = _mcp_user_sub.get()
+        if user_sub:
+            extra_headers["X-MCP-User-Sub"] = user_sub
+
+        upload_headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "User-Agent": "PARTS-MCP/1.0",
+            **extra_headers,
+        }
+
+        files = {"file": (filename, file_data, "application/octet-stream")}
+        data = {"target_version": target_version}
+
+        try:
+            response = httpx.request(
+                method="POST",
+                url=url,
+                files=files,
+                data=data,
+                headers=upload_headers,
+                timeout=120,
+            )
+
+            if response.status_code == 401:
+                raise SourcePartsAuthError("Invalid API key")
+            elif response.status_code == 403:
+                raise SourcePartsAuthError("Access forbidden")
+
+            if response.status_code != 200:
+                try:
+                    err = response.json()
+                    detail = err.get("error", err.get("detail", response.text[:500]))
+                except Exception:
+                    detail = response.text[:500]
+                raise SourcePartsAPIError(f"KiCad version conversion failed ({response.status_code}): {detail}")
+
+            return response.content
+
+        except (TimeoutException, RequestError) as e:
+            raise SourcePartsAPIError(f"KiCad version conversion request failed: {e}") from e
+
     # =========================================================================
     # Docs Endpoints (/api/docs)
     # =========================================================================

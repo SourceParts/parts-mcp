@@ -24,6 +24,7 @@ from parts_mcp.utils.netlist_parser import (
     analyze_connectivity,
     extract_netlist_from_schematic,
 )
+from parts_mcp.utils.api_client import SourcePartsAPIError, get_client
 from parts_mcp.utils.pcb_highlight import highlight_nets
 
 logger = logging.getLogger(__name__)
@@ -283,6 +284,65 @@ def register_kicad_tools(mcp: FastMCP) -> None:
         except Exception as e:
             logger.error(f"Error highlighting nets: {e}")
             return {"success": False, "error": str(e)}
+
+    @mcp.tool()
+    async def convert_kicad_version(
+        file_path: str,
+        target_version: str,
+        output_path: str | None = None,
+    ) -> dict[str, Any]:
+        """Convert a KiCad file to an older version.
+
+        Downconverts .kicad_pcb, .kicad_sch, or project ZIP archives from
+        KiCad 10 to version 7, 8, or 9 for fab shop compatibility.
+
+        Rounded rectangles (gr_roundrect / fp_roundrect) introduced in KiCad 10
+        are converted to right-angle rectangles. Hatched copper fills are removed.
+        The file version header is updated to match the target version.
+
+        Args:
+            file_path: Path to .kicad_pcb, .kicad_sch, or .zip project archive
+            target_version: Target version: "7", "8", or "9"
+            output_path: Where to save the result (default: same dir, _v<N> suffix)
+
+        Returns:
+            Dict with success, output_path, and conversion summary
+        """
+        path = Path(file_path).expanduser().resolve()
+        if not path.exists():
+            return {"success": False, "error": f"File not found: {file_path}"}
+
+        if target_version not in ("7", "8", "9"):
+            return {"success": False, "error": f"Invalid target_version '{target_version}'. Must be 7, 8, or 9"}
+
+        file_data = path.read_bytes()
+
+        try:
+            client = get_client()
+            result_bytes = client.convert_kicad_version(
+                file_data=file_data,
+                filename=path.name,
+                target_version=target_version,
+            )
+        except SourcePartsAPIError as e:
+            return {"success": False, "error": str(e)}
+
+        if output_path:
+            out = Path(output_path).expanduser().resolve()
+        else:
+            ext = path.suffix
+            stem = path.stem
+            out = path.with_name(f"{stem}_v{target_version}{ext}")
+
+        out.write_bytes(result_bytes)
+
+        return {
+            "success": True,
+            "output_path": str(out),
+            "target_version": target_version,
+            "source_file": str(path),
+            "output_size_bytes": len(result_bytes),
+        }
 
     @mcp.tool()
     async def export_parts_to_kicad(
