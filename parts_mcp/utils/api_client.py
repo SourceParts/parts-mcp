@@ -1758,6 +1758,74 @@ class SourcePartsClient:
         except (TimeoutException, RequestError) as e:
             raise SourcePartsAPIError(f"gEDA conversion request failed: {e}") from e
 
+    def convert_protel(
+        self,
+        file_data: bytes,
+        filename: str,
+    ) -> bytes:
+        """Convert a Protel99SE project file to KiCad format.
+
+        Sends the .sch/.pcb/.lib/.ddb file (or zip archive) to /v1/convert/protel
+        and returns a ZIP containing the converted KiCad files plus a
+        conversion_report.txt describing any warnings or unsupported features.
+
+        Args:
+            file_data: Raw file bytes (.sch, .pcb, .lib, .ddb, or .zip)
+            filename: Original filename
+
+        Returns:
+            ZIP archive bytes containing the converted KiCad files
+
+        Raises:
+            SourcePartsAPIError: On API errors
+        """
+        logger.info(f"Converting Protel project: {filename}")
+
+        base = self.base_url if self.base_url.endswith('/') else self.base_url + '/'
+        url = urljoin(base, 'convert/protel')
+
+        self._rate_limit()
+
+        extra_headers = {}
+        user_sub = _mcp_user_sub.get()
+        if user_sub:
+            extra_headers["X-MCP-User-Sub"] = user_sub
+
+        upload_headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "User-Agent": "PARTS-MCP/1.0",
+            **extra_headers,
+        }
+
+        files = {"file": (filename, file_data, "application/octet-stream")}
+
+        try:
+            response = httpx.request(
+                method="POST",
+                url=url,
+                files=files,
+                headers=upload_headers,
+                timeout=300,
+            )
+
+            if response.status_code == 401:
+                raise SourcePartsAuthError("Invalid API key")
+            elif response.status_code == 403:
+                raise SourcePartsAuthError("Access forbidden")
+
+            if response.status_code != 200:
+                try:
+                    err = response.json()
+                    detail = err.get("error", err.get("detail", response.text[:500]))
+                except Exception:
+                    detail = response.text[:500]
+                raise SourcePartsAPIError(f"Protel conversion failed ({response.status_code}): {detail}")
+
+            return response.content
+
+        except (TimeoutException, RequestError) as e:
+            raise SourcePartsAPIError(f"Protel conversion request failed: {e}") from e
+
     # =========================================================================
     # Docs Endpoints (/v1/docs)
     # =========================================================================

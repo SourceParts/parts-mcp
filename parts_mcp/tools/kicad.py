@@ -506,6 +506,65 @@ def register_kicad_tools(mcp: FastMCP) -> None:
         }
 
     @mcp.tool()
+    async def convert_protel(
+        file_path: str,
+        output_path: str | None = None,
+    ) -> dict[str, Any]:
+        """Convert a Protel99SE project file to KiCad format.
+
+        Converts Protel99SE schematic and PCB files to KiCad 7 format.
+        Accepts individual files (.sch, .pcb, .lib) or a zip archive
+        containing multiple Protel files.
+
+        The output ZIP includes the converted KiCad files and a
+        conversion_report.txt describing any warnings or unsupported features
+        (e.g. ASCII schematic format, unsupported .pcblib files).
+
+        .ddb archives require mdbtools on the server. If mdbtools is not
+        installed, the API returns a 503 error rather than silently producing
+        no output.
+
+        Args:
+            file_path: Path to Protel .sch, .pcb, .lib, .ddb, or .zip file
+            output_path: Where to save the output ZIP (default: <stem>_kicad.zip next to input)
+
+        Returns:
+            Dict with success, output_path, source_file, and output_size_bytes
+        """
+        path = Path(file_path).expanduser().resolve()
+        if not path.exists():
+            return {"success": False, "error": f"File not found: {file_path}"}
+
+        ext = path.suffix.lower()
+        if ext not in (".sch", ".pcb", ".lib", ".ddb", ".zip"):
+            return {"success": False, "error": f"Expected .sch, .pcb, .lib, .ddb, or .zip file, got {ext}"}
+
+        file_data = path.read_bytes()
+
+        try:
+            client = get_client()
+            result_bytes = client.convert_protel(
+                file_data=file_data,
+                filename=path.name,
+            )
+        except SourcePartsAPIError as e:
+            return {"success": False, "error": str(e)}
+
+        if output_path:
+            out = Path(output_path).expanduser().resolve()
+        else:
+            out = path.with_name(f"{path.stem}_kicad.zip")
+
+        out.write_bytes(result_bytes)
+
+        return {
+            "success": True,
+            "output_path": str(out),
+            "source_file": str(path),
+            "output_size_bytes": len(result_bytes),
+        }
+
+    @mcp.tool()
     async def export_parts_to_kicad(
         parts: list[dict[str, Any]],
         output_path: str,
