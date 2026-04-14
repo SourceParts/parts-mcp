@@ -1619,6 +1619,145 @@ class SourcePartsClient:
         except (TimeoutException, RequestError) as e:
             raise SourcePartsAPIError(f"Allegro conversion request failed: {e}") from e
 
+    def convert_pads(
+        self,
+        file_data: bytes,
+        filename: str,
+    ) -> bytes:
+        """Convert a PADS ASCII .asc layout file to KiCad format.
+
+        Sends the .asc file (or zip archive) to /v1/convert/pads and
+        returns a ZIP containing the converted .kicad_pcb file.
+
+        Uses kicad-cli pcb import --format pads. Board layout only —
+        schematics are not supported.
+
+        Args:
+            file_data: Raw file bytes (.asc or .zip)
+            filename: Original filename
+
+        Returns:
+            ZIP archive bytes containing the converted .kicad_pcb file
+
+        Raises:
+            SourcePartsAPIError: On API errors
+        """
+        logger.info(f"Converting PADS layout: {filename}")
+
+        base = self.base_url if self.base_url.endswith('/') else self.base_url + '/'
+        url = urljoin(base, 'convert/pads')
+
+        self._rate_limit()
+
+        extra_headers = {}
+        user_sub = _mcp_user_sub.get()
+        if user_sub:
+            extra_headers["X-MCP-User-Sub"] = user_sub
+
+        upload_headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "User-Agent": "PARTS-MCP/1.0",
+            **extra_headers,
+        }
+
+        files = {"file": (filename, file_data, "application/octet-stream")}
+
+        try:
+            response = httpx.request(
+                method="POST",
+                url=url,
+                files=files,
+                headers=upload_headers,
+                timeout=300,
+            )
+
+            if response.status_code == 401:
+                raise SourcePartsAuthError("Invalid API key")
+            elif response.status_code == 403:
+                raise SourcePartsAuthError("Access forbidden")
+
+            if response.status_code != 200:
+                try:
+                    err = response.json()
+                    detail = err.get("error", err.get("detail", response.text[:500]))
+                except Exception:
+                    detail = response.text[:500]
+                raise SourcePartsAPIError(f"PADS conversion failed ({response.status_code}): {detail}")
+
+            return response.content
+
+        except (TimeoutException, RequestError) as e:
+            raise SourcePartsAPIError(f"PADS conversion request failed: {e}") from e
+
+    def convert_geda(
+        self,
+        file_data: bytes,
+        filename: str,
+    ) -> bytes:
+        """Convert a gEDA .pcb board file to KiCad format.
+
+        Sends the .pcb file (or zip archive) to /v1/convert/geda and
+        returns a ZIP containing the converted .kicad_pcb file.
+
+        Board layout only — schematic import is not supported.
+
+        Args:
+            file_data: Raw file bytes (.pcb or .zip)
+            filename: Original filename
+
+        Returns:
+            ZIP archive bytes containing the converted .kicad_pcb file
+
+        Raises:
+            SourcePartsAPIError: On API errors
+        """
+        logger.info(f"Converting gEDA board: {filename}")
+
+        base = self.base_url if self.base_url.endswith('/') else self.base_url + '/'
+        url = urljoin(base, 'convert/geda')
+
+        self._rate_limit()
+
+        extra_headers = {}
+        user_sub = _mcp_user_sub.get()
+        if user_sub:
+            extra_headers["X-MCP-User-Sub"] = user_sub
+
+        upload_headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "User-Agent": "PARTS-MCP/1.0",
+            **extra_headers,
+        }
+
+        files = {"file": (filename, file_data, "application/octet-stream")}
+
+        try:
+            response = httpx.request(
+                method="POST",
+                url=url,
+                files=files,
+                headers=upload_headers,
+                timeout=300,
+            )
+
+            if response.status_code == 401:
+                raise SourcePartsAuthError("Invalid API key")
+            elif response.status_code == 403:
+                raise SourcePartsAuthError("Access forbidden")
+
+            if response.status_code != 200:
+                try:
+                    err = response.json()
+                    detail = err.get("error", err.get("detail", response.text[:500]))
+                except Exception:
+                    detail = response.text[:500]
+                raise SourcePartsAPIError(f"gEDA conversion failed ({response.status_code}): {detail}")
+
+            return response.content
+
+        except (TimeoutException, RequestError) as e:
+            raise SourcePartsAPIError(f"gEDA conversion request failed: {e}") from e
+
     # =========================================================================
     # Docs Endpoints (/v1/docs)
     # =========================================================================

@@ -402,6 +402,110 @@ def register_kicad_tools(mcp: FastMCP) -> None:
         }
 
     @mcp.tool()
+    async def convert_pads(
+        file_path: str,
+        output_path: str | None = None,
+    ) -> dict[str, Any]:
+        """Convert a PADS ASCII layout file to KiCad format.
+
+        Imports a PADS ASCII .asc layout file using kicad-cli pcb import
+        --format pads. Board files only — schematics are not supported.
+
+        Output is a ZIP archive containing the .kicad_pcb file.
+
+        Args:
+            file_path: Path to PADS .asc file or zip archive
+            output_path: Where to save the output ZIP (default: <stem>_kicad.zip next to input)
+
+        Returns:
+            Dict with success, output_path, source_file, and output_size_bytes
+        """
+        path = Path(file_path).expanduser().resolve()
+        if not path.exists():
+            return {"success": False, "error": f"File not found: {file_path}"}
+
+        ext = path.suffix.lower()
+        if ext not in (".asc", ".zip"):
+            return {"success": False, "error": f"Expected .asc or .zip file, got {ext}"}
+
+        file_data = path.read_bytes()
+
+        try:
+            client = get_client()
+            result_bytes = client.convert_pads(
+                file_data=file_data,
+                filename=path.name,
+            )
+        except SourcePartsAPIError as e:
+            return {"success": False, "error": str(e)}
+
+        if output_path:
+            out = Path(output_path).expanduser().resolve()
+        else:
+            out = path.with_name(f"{path.stem}_kicad.zip")
+
+        out.write_bytes(result_bytes)
+
+        return {
+            "success": True,
+            "output_path": str(out),
+            "source_file": str(path),
+            "output_size_bytes": len(result_bytes),
+        }
+
+    @mcp.tool()
+    async def convert_geda(
+        file_path: str,
+        output_path: str | None = None,
+    ) -> dict[str, Any]:
+        """Convert a gEDA PCB board file to KiCad format.
+
+        Imports a gEDA .pcb board file using KiCad's pcbnew bindings.
+        Board files only — schematic import is not available programmatically.
+
+        Output is a ZIP archive containing the .kicad_pcb file.
+
+        Args:
+            file_path: Path to gEDA .pcb file or zip archive
+            output_path: Where to save the output ZIP (default: <stem>_kicad.zip next to input)
+
+        Returns:
+            Dict with success, output_path, source_file, and output_size_bytes
+        """
+        path = Path(file_path).expanduser().resolve()
+        if not path.exists():
+            return {"success": False, "error": f"File not found: {file_path}"}
+
+        ext = path.suffix.lower()
+        if ext not in (".pcb", ".zip"):
+            return {"success": False, "error": f"Expected .pcb or .zip file, got {ext}"}
+
+        file_data = path.read_bytes()
+
+        try:
+            client = get_client()
+            result_bytes = client.convert_geda(
+                file_data=file_data,
+                filename=path.name,
+            )
+        except SourcePartsAPIError as e:
+            return {"success": False, "error": str(e)}
+
+        if output_path:
+            out = Path(output_path).expanduser().resolve()
+        else:
+            out = path.with_name(f"{path.stem}_kicad.zip")
+
+        out.write_bytes(result_bytes)
+
+        return {
+            "success": True,
+            "output_path": str(out),
+            "source_file": str(path),
+            "output_size_bytes": len(result_bytes),
+        }
+
+    @mcp.tool()
     async def export_parts_to_kicad(
         parts: list[dict[str, Any]],
         output_path: str,
