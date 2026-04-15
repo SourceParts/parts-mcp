@@ -380,33 +380,6 @@ class SourcePartsOIDCProxy(OIDCProxy):
         if valid_scopes and self.client_registration_options:
             self.client_registration_options.valid_scopes = valid_scopes
 
-    async def _handle_idp_callback(self, request):
-        """Override to rewrite portless localhost redirect URLs to port 3118.
-
-        Workaround for Claude Code CIMD regression (#37747): Claude Code 2.1.80+
-        sends redirect_uri=http://localhost/callback (portless, from the CIMD doc)
-        but its OAuth callback server listens on port 3118. After Auth0 redirects
-        back, we would redirect the browser to port 80 (implicit) where nothing
-        listens — Claude Code never receives the callback and hangs.
-
-        We only rewrite the final 302 Location header here, NOT the stored
-        client_redirect_uri. The stored value must stay portless so that Claude
-        Code's token exchange request (which also sends the portless URI) matches
-        and succeeds.
-        """
-        response = await super()._handle_idp_callback(request)
-        if hasattr(response, "headers") and "location" in response.headers:
-            location = response.headers["location"]
-            rewritten = _rewrite_claude_code_redirect_uri(location)
-            if rewritten != location:
-                response.headers["location"] = rewritten
-                logger.info(
-                    "Rewrote Claude Code CLI callback location: %s -> %s",
-                    location,
-                    rewritten,
-                )
-        return response
-
     def set_mcp_path(self, mcp_path: str | None) -> None:
         """Override to create RS256JWTIssuer instead of HS256 JWTIssuer."""
         # Call the grandparent (OAuthProvider) set_mcp_path to set _resource_url
@@ -644,6 +617,13 @@ class SourcePartsOIDCProxy(OIDCProxy):
         We intercept the redirect, extract the destination URL, and instead return
         a branded HTML page that JS-redirects the browser to localhost so Claude
         Code still receives the authorization code.
+
+        Also rewrites portless localhost callback URIs to port 3118 as a workaround
+        for Claude Code CIMD regression #37747: Claude Code 2.1.80+ sends
+        redirect_uri=http://localhost/callback (no port) but listens on port 3118.
+        We only rewrite the final destination URL here, NOT the stored
+        client_redirect_uri, so the token exchange POST (which also sends the
+        portless URI) continues to match.
         """
         from starlette.responses import RedirectResponse
         from fastmcp.utilities.ui import create_secure_html_response
@@ -654,6 +634,8 @@ class SourcePartsOIDCProxy(OIDCProxy):
         # Leave error redirects (data: URLs) and non-localhost URLs unchanged.
         if isinstance(response, RedirectResponse):
             location = response.headers.get("location", "")
+            # Rewrite portless localhost URIs to port 3118 (CIMD regression #37747).
+            location = _rewrite_claude_code_redirect_uri(location)
             if "localhost" in location or "127.0.0.1" in location:
                 logger.info("Serving branded success page before localhost callback redirect")
                 return create_secure_html_response(_create_success_html(callback_url=location))
