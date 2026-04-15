@@ -18,6 +18,7 @@ import logging
 import time
 from contextvars import ContextVar
 from typing import Any
+from urllib.parse import urlparse, urlunparse
 
 from authlib.jose import JsonWebKey, JsonWebToken
 from authlib.jose.errors import JoseError
@@ -180,6 +181,30 @@ class RS256JWTIssuer:
 def load_rsa_private_key(env_value: str) -> bytes:
     """Decode a base64-encoded PEM private key from an env var value."""
     return base64.b64decode(env_value)
+
+
+def _rewrite_claude_code_redirect_uri(uri: str) -> str:
+    """Rewrite portless localhost redirect URIs to port 3118.
+
+    Claude Code 2.1.80+ (CIMD regression #37747) sends redirect_uri=http://localhost/callback
+    or http://127.0.0.1/callback (no port, from the CIMD document at
+    https://claude.ai/oauth/claude-code-client-metadata) but starts its OAuth
+    callback server on port 3118. The browser redirects to port 80 (implicit),
+    nothing is listening there, and Claude Code hangs waiting for the callback.
+
+    We rewrite portless localhost /callback URIs to port 3118 so the callback
+    reaches Claude Code's server correctly.
+    """
+    parsed = urlparse(uri)
+    if (
+        parsed.scheme == "http"
+        and parsed.hostname in ("localhost", "127.0.0.1")
+        and not parsed.port
+        and parsed.path == "/callback"
+    ):
+        new_netloc = f"{parsed.hostname}:3118"
+        return urlunparse(parsed._replace(netloc=new_netloc))
+    return uri
 
 
 def _create_consent_html(
@@ -354,6 +379,33 @@ class SourcePartsOIDCProxy(OIDCProxy):
         # scopes and DCR accepts them.
         if valid_scopes and self.client_registration_options:
             self.client_registration_options.valid_scopes = valid_scopes
+
+    async def _handle_idp_callback(self, request):
+        """Override to rewrite portless localhost redirect URLs to port 3118.
+
+        Workaround for Claude Code CIMD regression (#37747): Claude Code 2.1.80+
+        sends redirect_uri=http://localhost/callback (portless, from the CIMD doc)
+        but its OAuth callback server listens on port 3118. After Auth0 redirects
+        back, we would redirect the browser to port 80 (implicit) where nothing
+        listens — Claude Code never receives the callback and hangs.
+
+        We only rewrite the final 302 Location header here, NOT the stored
+        client_redirect_uri. The stored value must stay portless so that Claude
+        Code's token exchange request (which also sends the portless URI) matches
+        and succeeds.
+        """
+        response = await super()._handle_idp_callback(request)
+        if hasattr(response, "headers") and "location" in response.headers:
+            location = response.headers["location"]
+            rewritten = _rewrite_claude_code_redirect_uri(location)
+            if rewritten != location:
+                response.headers["location"] = rewritten
+                logger.info(
+                    "Rewrote Claude Code CLI callback location: %s -> %s",
+                    location,
+                    rewritten,
+                )
+        return response
 
     def set_mcp_path(self, mcp_path: str | None) -> None:
         """Override to create RS256JWTIssuer instead of HS256 JWTIssuer."""
