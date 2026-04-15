@@ -70,6 +70,15 @@ def register_search_tools(mcp: FastMCP) -> None:
                 "success": True
             }
 
+            # Surface external supplier search status to AI assistants
+            if results.get('sync_status'):
+                formatted_results['sync_status'] = results['sync_status']
+                formatted_results['message'] = (
+                    "No results in local database. External supplier search triggered — "
+                    "results from LCSC, Digikey, and Mouser typically appear within 5-15 seconds. "
+                    "Retry the search shortly."
+                )
+
             logger.info(f"Found {formatted_results['total_results']} results for query: {query}")
             return formatted_results
 

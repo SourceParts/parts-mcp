@@ -168,15 +168,57 @@ def create_server(server_cfg: ServerConfig, auth_cfg: AuthConfig, storage_cfg: S
     register_datasheet_tools(mcp, local_mode=not hosted)
     register_docs_tools(mcp)
 
+    # Render pipeline tools (Blender headless render)
+    from parts_mcp.tools.render import register_render_tools
+    register_render_tools(mcp)
+    logger.info("Registered render pipeline tools")
+
+    # ECN + ECO tools are remote-only (API-backed). For local operations,
+    # clients should use the `parts` CLI directly.
+    from parts_mcp.tools.ecn import register_ecn_tools
+    from parts_mcp.tools.eco import register_eco_tools
+    register_ecn_tools(mcp)
+    register_eco_tools(mcp)
+
+    # User profile, preferences, and device management
+    from parts_mcp.tools.preferences import register_preference_tools
+    register_preference_tools(mcp)
+    logger.info("Registered ECN + ECO + preference tools")
+
+    # DFM pipeline tools (both hosted and local — customer-facing + admin)
+    from parts_mcp.tools.dfm_pipeline import register_dfm_pipeline_tools
+    register_dfm_pipeline_tools(mcp)
+    logger.info("Registered DFM pipeline tools")
+
     # Local-only tools require filesystem access — skip in hosted mode
     if not hosted:
+        from parts_mcp.tools.cli import register_cli_tools
         from parts_mcp.tools.kicad import register_kicad_tools
+        from parts_mcp.tools.kicad_ctrl import register_kicad_ctrl_tools
+        from parts_mcp.tools.kicad_sch import register_kicad_sch_tools
         from parts_mcp.tools.project import register_project_tools
+        from parts_mcp.tools.sales_pipeline import register_sales_pipeline_tools
+        register_cli_tools(mcp)
         register_kicad_tools(mcp)
+        register_kicad_ctrl_tools(mcp)
+        register_kicad_sch_tools(mcp)
         register_project_tools(mcp)
-        logger.info("Registered local tools (KiCad, project)")
+        register_sales_pipeline_tools(mcp)
+        from parts_mcp.tools.assembly_pipeline import register_assembly_pipeline_tools
+        register_assembly_pipeline_tools(mcp)
+        from parts_mcp.tools.logistics_pipeline import register_logistics_pipeline_tools
+        register_logistics_pipeline_tools(mcp)
+        from parts_mcp.tools.supply_chain_pipeline import register_supply_chain_pipeline_tools
+        register_supply_chain_pipeline_tools(mcp)
+        from parts_mcp.tools.design_pipeline import register_design_pipeline_tools
+        register_design_pipeline_tools(mcp)
+        from parts_mcp.tools.quality_pipeline import register_quality_pipeline_tools
+        register_quality_pipeline_tools(mcp)
+        from parts_mcp.tools.test_pipeline import register_test_pipeline_tools
+        register_test_pipeline_tools(mcp)
+        logger.info("Registered local tools (CLI, KiCad, KiCad-Ctrl, Sales, Assembly, Logistics, Supply Chain, Design, Quality, Test, project)")
     else:
-        logger.info("Skipped local tools (hosted mode)")
+        logger.info("Skipped local-only tools (hosted mode)")
 
     # Register prompts
     logger.info("Registering prompts...")
@@ -287,8 +329,8 @@ def _run_http(server: FastMCP, server_cfg: ServerConfig) -> None:
     # Mount MCP app under a parent Starlette app that also has /health and /jwks
     app = Starlette(
         routes=[
-            Route("/api/health", health),
-            Route("/api/docs", docs),
+            Route("/v1/health", health),
+            Route("/v1/docs", docs),
             Route("/.well-known/jwks.json", jwks),
         ],
         lifespan=mcp_app.router.lifespan_context,

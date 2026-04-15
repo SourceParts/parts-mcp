@@ -119,7 +119,7 @@ class SourcePartsClient:
             params: Query parameters
             json_data: JSON body data
             retry_count: Number of retries on failure
-            base_url: Override base URL for this request (e.g. for /api/ endpoints)
+            base_url: Override base URL for this request (e.g. for /v1/ endpoints)
 
         Returns:
             API response data
@@ -166,6 +166,20 @@ class SourcePartsClient:
                     raise SourcePartsAuthError("Invalid API key")
                 elif response.status_code == 403:
                     raise SourcePartsAuthError("Access forbidden - check API permissions")
+
+                # Retry on 502/503/504 (upstream/gateway errors)
+                if response.status_code in (502, 503, 504):
+                    if attempt < retry_count - 1:
+                        wait = 2 ** attempt
+                        logger.warning(
+                            f"Server error {response.status_code}, retry {attempt + 1}/{retry_count} in {wait}s"
+                        )
+                        time.sleep(wait)
+                        continue
+                    raise SourcePartsAPIError(
+                        f"Service unavailable (HTTP {response.status_code}). "
+                        "The API server may be restarting or under maintenance. Please try again in a few minutes."
+                    )
 
                 # Raise for other HTTP errors
                 response.raise_for_status()
@@ -278,6 +292,20 @@ class SourcePartsClient:
                 elif response.status_code == 403:
                     raise SourcePartsAuthError("Access forbidden - check API permissions")
 
+                # Retry on 502/503/504 (upstream/gateway errors)
+                if response.status_code in (502, 503, 504):
+                    if attempt < retry_count - 1:
+                        wait = 2 ** attempt
+                        logger.warning(
+                            f"Server error {response.status_code}, retry {attempt + 1}/{retry_count} in {wait}s"
+                        )
+                        time.sleep(wait)
+                        continue
+                    raise SourcePartsAPIError(
+                        f"Service unavailable (HTTP {response.status_code}). "
+                        "The API server may be restarting or under maintenance. Please try again in a few minutes."
+                    )
+
                 response.raise_for_status()
 
                 raw_response = response.json()
@@ -354,7 +382,7 @@ class SourcePartsClient:
 
             # Response is already unwrapped by _make_request
             # v1 API returns: {"parts": [...], "total": N, "limit": N, "offset": N, "query": "..."}
-            return {
+            result = {
                 'results': response.get('parts', []),
                 'total': response.get('total', len(response.get('parts', []))),
                 'limit': response.get('limit', limit),
@@ -362,6 +390,14 @@ class SourcePartsClient:
                 'query': query,
                 'filters': filters or {}
             }
+
+            # Forward external supplier search status when present
+            if response.get('sync_status'):
+                result['sync_status'] = response['sync_status']
+            if response.get('sync_hint'):
+                result['sync_hint'] = response['sync_hint']
+
+            return result
 
         except Exception as e:
             logger.error(f"Search failed: {e}")
@@ -1209,6 +1245,20 @@ class SourcePartsClient:
                 elif response.status_code == 403:
                     raise SourcePartsAuthError("Access forbidden - check API permissions")
 
+                # Retry on 502/503/504 (upstream/gateway errors)
+                if response.status_code in (502, 503, 504):
+                    if attempt < retry_count - 1:
+                        wait = 2 ** attempt
+                        logger.warning(
+                            f"Server error {response.status_code}, retry {attempt + 1}/{retry_count} in {wait}s"
+                        )
+                        time.sleep(wait)
+                        continue
+                    raise SourcePartsAPIError(
+                        f"Service unavailable (HTTP {response.status_code}). "
+                        "The API server may be restarting or under maintenance. Please try again in a few minutes."
+                    )
+
                 response.raise_for_status()
 
                 raw_response = response.json()
@@ -1427,8 +1477,357 @@ class SourcePartsClient:
         except (TimeoutException, RequestError) as e:
             raise SourcePartsAPIError(f"PCB highlight request failed: {e}") from e
 
+    def convert_kicad_version(
+        self,
+        file_data: bytes,
+        filename: str,
+        target_version: str,
+    ) -> bytes:
+        """Downconvert a KiCad file from version 10 to an older version.
+
+        Sends .kicad_pcb, .kicad_sch, or project ZIP to /v1/convert/kicad/version
+        and returns the converted file bytes.
+
+        Args:
+            file_data: Raw file bytes
+            filename: Original filename (determines response MIME type)
+            target_version: Target version string: "7", "8", or "9"
+
+        Returns:
+            Converted file as raw bytes
+
+        Raises:
+            SourcePartsAPIError: On API errors
+        """
+        logger.info(f"Converting {filename} to KiCad {target_version}")
+
+        base = self.base_url if self.base_url.endswith('/') else self.base_url + '/'
+        url = urljoin(base, 'convert/kicad/version')
+
+        self._rate_limit()
+
+        extra_headers = {}
+        user_sub = _mcp_user_sub.get()
+        if user_sub:
+            extra_headers["X-MCP-User-Sub"] = user_sub
+
+        upload_headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "User-Agent": "PARTS-MCP/1.0",
+            **extra_headers,
+        }
+
+        files = {"file": (filename, file_data, "application/octet-stream")}
+        data = {"target_version": target_version}
+
+        try:
+            response = httpx.request(
+                method="POST",
+                url=url,
+                files=files,
+                data=data,
+                headers=upload_headers,
+                timeout=120,
+            )
+
+            if response.status_code == 401:
+                raise SourcePartsAuthError("Invalid API key")
+            elif response.status_code == 403:
+                raise SourcePartsAuthError("Access forbidden")
+
+            if response.status_code != 200:
+                try:
+                    err = response.json()
+                    detail = err.get("error", err.get("detail", response.text[:500]))
+                except Exception:
+                    detail = response.text[:500]
+                raise SourcePartsAPIError(f"KiCad version conversion failed ({response.status_code}): {detail}")
+
+            return response.content
+
+        except (TimeoutException, RequestError) as e:
+            raise SourcePartsAPIError(f"KiCad version conversion request failed: {e}") from e
+
+    def convert_allegro(
+        self,
+        file_data: bytes,
+        filename: str,
+    ) -> bytes:
+        """Convert a Cadence Allegro .brd board file to KiCad format.
+
+        Sends the .brd file (or zip archive) to /v1/convert/allegro and
+        returns a ZIP containing the converted .kicad_pcb file.
+
+        Supports Allegro binary format versions 16-23. Board layout only —
+        schematics are not supported. The .brd extension is shared with Eagle;
+        format is auto-detected by KiCad via magic bytes.
+
+        Args:
+            file_data: Raw file bytes (.brd or .zip)
+            filename: Original filename
+
+        Returns:
+            ZIP archive bytes containing the converted .kicad_pcb file
+
+        Raises:
+            SourcePartsAPIError: On API errors
+        """
+        logger.info(f"Converting Allegro board: {filename}")
+
+        base = self.base_url if self.base_url.endswith('/') else self.base_url + '/'
+        url = urljoin(base, 'convert/allegro')
+
+        self._rate_limit()
+
+        extra_headers = {}
+        user_sub = _mcp_user_sub.get()
+        if user_sub:
+            extra_headers["X-MCP-User-Sub"] = user_sub
+
+        upload_headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "User-Agent": "PARTS-MCP/1.0",
+            **extra_headers,
+        }
+
+        files = {"file": (filename, file_data, "application/octet-stream")}
+
+        try:
+            response = httpx.request(
+                method="POST",
+                url=url,
+                files=files,
+                headers=upload_headers,
+                timeout=300,
+            )
+
+            if response.status_code == 401:
+                raise SourcePartsAuthError("Invalid API key")
+            elif response.status_code == 403:
+                raise SourcePartsAuthError("Access forbidden")
+
+            if response.status_code != 200:
+                try:
+                    err = response.json()
+                    detail = err.get("error", err.get("detail", response.text[:500]))
+                except Exception:
+                    detail = response.text[:500]
+                raise SourcePartsAPIError(f"Allegro conversion failed ({response.status_code}): {detail}")
+
+            return response.content
+
+        except (TimeoutException, RequestError) as e:
+            raise SourcePartsAPIError(f"Allegro conversion request failed: {e}") from e
+
+    def convert_pads(
+        self,
+        file_data: bytes,
+        filename: str,
+    ) -> bytes:
+        """Convert a PADS ASCII .asc layout file to KiCad format.
+
+        Sends the .asc file (or zip archive) to /v1/convert/pads and
+        returns a ZIP containing the converted .kicad_pcb file.
+
+        Uses kicad-cli pcb import --format pads. Board layout only —
+        schematics are not supported.
+
+        Args:
+            file_data: Raw file bytes (.asc or .zip)
+            filename: Original filename
+
+        Returns:
+            ZIP archive bytes containing the converted .kicad_pcb file
+
+        Raises:
+            SourcePartsAPIError: On API errors
+        """
+        logger.info(f"Converting PADS layout: {filename}")
+
+        base = self.base_url if self.base_url.endswith('/') else self.base_url + '/'
+        url = urljoin(base, 'convert/pads')
+
+        self._rate_limit()
+
+        extra_headers = {}
+        user_sub = _mcp_user_sub.get()
+        if user_sub:
+            extra_headers["X-MCP-User-Sub"] = user_sub
+
+        upload_headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "User-Agent": "PARTS-MCP/1.0",
+            **extra_headers,
+        }
+
+        files = {"file": (filename, file_data, "application/octet-stream")}
+
+        try:
+            response = httpx.request(
+                method="POST",
+                url=url,
+                files=files,
+                headers=upload_headers,
+                timeout=300,
+            )
+
+            if response.status_code == 401:
+                raise SourcePartsAuthError("Invalid API key")
+            elif response.status_code == 403:
+                raise SourcePartsAuthError("Access forbidden")
+
+            if response.status_code != 200:
+                try:
+                    err = response.json()
+                    detail = err.get("error", err.get("detail", response.text[:500]))
+                except Exception:
+                    detail = response.text[:500]
+                raise SourcePartsAPIError(f"PADS conversion failed ({response.status_code}): {detail}")
+
+            return response.content
+
+        except (TimeoutException, RequestError) as e:
+            raise SourcePartsAPIError(f"PADS conversion request failed: {e}") from e
+
+    def convert_geda(
+        self,
+        file_data: bytes,
+        filename: str,
+    ) -> bytes:
+        """Convert a gEDA .pcb board file to KiCad format.
+
+        Sends the .pcb file (or zip archive) to /v1/convert/geda and
+        returns a ZIP containing the converted .kicad_pcb file.
+
+        Board layout only — schematic import is not supported.
+
+        Args:
+            file_data: Raw file bytes (.pcb or .zip)
+            filename: Original filename
+
+        Returns:
+            ZIP archive bytes containing the converted .kicad_pcb file
+
+        Raises:
+            SourcePartsAPIError: On API errors
+        """
+        logger.info(f"Converting gEDA board: {filename}")
+
+        base = self.base_url if self.base_url.endswith('/') else self.base_url + '/'
+        url = urljoin(base, 'convert/geda')
+
+        self._rate_limit()
+
+        extra_headers = {}
+        user_sub = _mcp_user_sub.get()
+        if user_sub:
+            extra_headers["X-MCP-User-Sub"] = user_sub
+
+        upload_headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "User-Agent": "PARTS-MCP/1.0",
+            **extra_headers,
+        }
+
+        files = {"file": (filename, file_data, "application/octet-stream")}
+
+        try:
+            response = httpx.request(
+                method="POST",
+                url=url,
+                files=files,
+                headers=upload_headers,
+                timeout=300,
+            )
+
+            if response.status_code == 401:
+                raise SourcePartsAuthError("Invalid API key")
+            elif response.status_code == 403:
+                raise SourcePartsAuthError("Access forbidden")
+
+            if response.status_code != 200:
+                try:
+                    err = response.json()
+                    detail = err.get("error", err.get("detail", response.text[:500]))
+                except Exception:
+                    detail = response.text[:500]
+                raise SourcePartsAPIError(f"gEDA conversion failed ({response.status_code}): {detail}")
+
+            return response.content
+
+        except (TimeoutException, RequestError) as e:
+            raise SourcePartsAPIError(f"gEDA conversion request failed: {e}") from e
+
+    def convert_protel(
+        self,
+        file_data: bytes,
+        filename: str,
+    ) -> bytes:
+        """Convert a Protel99SE project file to KiCad format.
+
+        Sends the .sch/.pcb/.lib/.ddb file (or zip archive) to /v1/convert/protel
+        and returns a ZIP containing the converted KiCad files plus a
+        conversion_report.txt describing any warnings or unsupported features.
+
+        Args:
+            file_data: Raw file bytes (.sch, .pcb, .lib, .ddb, or .zip)
+            filename: Original filename
+
+        Returns:
+            ZIP archive bytes containing the converted KiCad files
+
+        Raises:
+            SourcePartsAPIError: On API errors
+        """
+        logger.info(f"Converting Protel project: {filename}")
+
+        base = self.base_url if self.base_url.endswith('/') else self.base_url + '/'
+        url = urljoin(base, 'convert/protel')
+
+        self._rate_limit()
+
+        extra_headers = {}
+        user_sub = _mcp_user_sub.get()
+        if user_sub:
+            extra_headers["X-MCP-User-Sub"] = user_sub
+
+        upload_headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "User-Agent": "PARTS-MCP/1.0",
+            **extra_headers,
+        }
+
+        files = {"file": (filename, file_data, "application/octet-stream")}
+
+        try:
+            response = httpx.request(
+                method="POST",
+                url=url,
+                files=files,
+                headers=upload_headers,
+                timeout=300,
+            )
+
+            if response.status_code == 401:
+                raise SourcePartsAuthError("Invalid API key")
+            elif response.status_code == 403:
+                raise SourcePartsAuthError("Access forbidden")
+
+            if response.status_code != 200:
+                try:
+                    err = response.json()
+                    detail = err.get("error", err.get("detail", response.text[:500]))
+                except Exception:
+                    detail = response.text[:500]
+                raise SourcePartsAPIError(f"Protel conversion failed ({response.status_code}): {detail}")
+
+            return response.content
+
+        except (TimeoutException, RequestError) as e:
+            raise SourcePartsAPIError(f"Protel conversion request failed: {e}") from e
+
     # =========================================================================
-    # Docs Endpoints (/api/docs)
+    # Docs Endpoints (/v1/docs)
     # =========================================================================
 
     def get_cli_docs(self, section: str | None = None) -> dict:
@@ -1449,12 +1848,12 @@ class SourcePartsClient:
                                   base_url=self._get_host_url())
 
     # =========================================================================
-    # Project Endpoints (/api/projects)
+    # Project Endpoints (/v1/projects)
     # =========================================================================
 
     def _project_base_url(self) -> str:
-        """Get the base URL for project endpoints (uses /api/ not /v1/)."""
-        return self._get_host_url() + "/api/"
+        """Get the base URL for project, user, and ECN endpoints."""
+        return self._get_host_url() + "/v1/"
 
     def get_project(self, project_id: str) -> dict[str, Any]:
         """Get a project by ID.
