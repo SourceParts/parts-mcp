@@ -3,7 +3,7 @@
   "name": "io.github.sourceparts/parts-mcp",
   "title": "Source Parts",
   "description": "Electronic component sourcing, BOM management, and PCB design workflows. Search millions of parts, compare prices, check availability, process BOMs from KiCad/Altium/Eagle/Fusion360, and manage ECNs.",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "repository": {
     "url": "https://github.com/SourceParts/parts-mcp",
     "source": "github"
@@ -13,7 +13,7 @@
     {
       "registryType": "pypi",
       "identifier": "parts-mcp",
-      "version": "0.2.1",
+      "version": "0.3.0",
       "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"
