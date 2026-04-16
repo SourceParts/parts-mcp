@@ -95,7 +95,7 @@ with open('server.json', 'w') as f:
 "
 
 # Verify all match
-PYPROJECT=$(python3 -c "import re; print(re.search(r'version\s*=\"(.+?)\"', open('pyproject.toml').read()).group(1))")
+PYPROJECT=$(python3 -c "import re; print(re.search(r'version\s*=\s*\"(.+?)\"', open('pyproject.toml').read()).group(1))")
 INIT=$(python3 -c "import re; print(re.search(r'__version__\s*=\s*\"(.+?)\"', open('parts_mcp/__init__.py').read()).group(1))")
 PKG=$(python3 -c "import json; print(json.load(open('package.json'))['version'])")
 SRV=$(python3 -c "import json; print(json.load(open('server.json'))['version'])")
