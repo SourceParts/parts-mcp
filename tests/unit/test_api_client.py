@@ -25,11 +25,18 @@ class TestSourcePartsClientInit:
             client = SourcePartsClient(api_key="test-key")
             assert client.api_key == "test-key"
 
-    def test_init_without_api_key_raises_error(self):
-        """Client raises error when no API key is provided."""
+    def test_init_without_api_key_warns(self, caplog):
+        """Client logs a warning (not an error) when no API key is provided.
+
+        The client can still authenticate via the per-request OAuth token
+        injected by with_user_context, so missing static key is non-fatal.
+        """
+        import logging
         with patch.dict('os.environ', {'SOURCE_PARTS_API_KEY': ''}):
-            with pytest.raises(SourcePartsAuthError, match="No API key"):
-                SourcePartsClient(api_key="")
+            with patch('parts_mcp.utils.api_client.httpx.Client'):
+                with caplog.at_level(logging.WARNING, logger='parts_mcp.utils.api_client'):
+                    client = SourcePartsClient(api_key="")
+        assert any("SOURCE_PARTS_API_KEY" in r.message for r in caplog.records)
 
     def test_init_uses_correct_base_url(self):
         """Client uses the correct default base URL."""

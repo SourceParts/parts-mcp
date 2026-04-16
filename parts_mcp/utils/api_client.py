@@ -26,6 +26,10 @@ logger = logging.getLogger(__name__)
 # decorator, read by SourcePartsClient._make_request to forward as a header.
 _mcp_user_sub: ContextVar[str | None] = ContextVar("_mcp_user_sub", default=None)
 
+# Raw OAuth bearer token for the current MCP request. Set by with_user_context
+# and used as Authorization header, taking precedence over SOURCE_PARTS_API_KEY.
+_mcp_oauth_token: ContextVar[str | None] = ContextVar("_mcp_oauth_token", default=None)
+
 
 class SourcePartsAPIError(Exception):
     """Base exception for Source Parts API errors."""
@@ -56,13 +60,12 @@ class SourcePartsClient:
         self.base_url = base_url or SOURCE_PARTS_API_URL
 
         if not self.api_key:
-            raise SourcePartsAuthError("No API key provided. Set SOURCE_PARTS_API_KEY in .env")
+            logger.warning("No SOURCE_PARTS_API_KEY set — will use per-request OAuth token from MCP context")
 
-        # Initialize HTTP client
+        # Initialize HTTP client (Authorization set per-request via _auth_header())
         self.client = httpx.Client(
             timeout=SEARCH_TIMEOUT,
             headers={
-                "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
                 "User-Agent": "PARTS-MCP/1.0"
             }
@@ -92,6 +95,70 @@ class SourcePartsClient:
             time.sleep(sleep_time)
 
         self._last_request_time = time.time()
+
+    def _auth_header(self) -> str:
+        """Return the bearer token for the current request context.
+
+        Prefers the per-request OAuth token injected by with_user_context;
+        falls back to the static SOURCE_PARTS_API_KEY.
+        """
+        token = _mcp_oauth_token.get()
+        return token if token else self.api_key
+
+    def _context_headers(self) -> dict[str, str]:
+        """Build auth + identity headers for the current MCP request context."""
+        headers: dict[str, str] = {"Authorization": f"Bearer {self._auth_header()}", "User-Agent": "PARTS-MCP/1.0"}
+        user_sub = _mcp_user_sub.get()
+        if user_sub:
+            headers["X-MCP-User-Sub"] = user_sub
+        return headers
+
+    def _make_file_conversion(
+        self,
+        endpoint: str,
+        file_data: bytes,
+        filename: str,
+        form_data: dict[str, str] | None = None,
+        timeout: int = 300,
+        error_prefix: str = "Conversion",
+    ) -> bytes:
+        """POST a single file to a conversion endpoint and return raw response bytes.
+
+        Handles auth, rate-limiting, and error mapping. No retry — conversion
+        endpoints are idempotent but expensive; callers retry if needed.
+        """
+        url = self._resolve_url(endpoint)
+        self._rate_limit()
+        files = {"file": (filename, file_data, "application/octet-stream")}
+        try:
+            response = httpx.request(
+                method="POST",
+                url=url,
+                files=files,
+                data=form_data or {},
+                headers=self._context_headers(),
+                timeout=timeout,
+            )
+            if response.status_code == 401:
+                raise SourcePartsAuthError("Invalid API key")
+            elif response.status_code == 403:
+                raise SourcePartsAuthError("Access forbidden")
+            if response.status_code != 200:
+                try:
+                    err = response.json()
+                    detail = err.get("error", err.get("detail", response.text[:500]))
+                except Exception:
+                    detail = response.text[:500]
+                raise SourcePartsAPIError(f"{error_prefix} failed ({response.status_code}): {detail}")
+            return response.content
+        except (TimeoutException, RequestError) as e:
+            raise SourcePartsAPIError(f"{error_prefix} request failed: {e}") from e
+
+    def _resolve_url(self, endpoint: str, base_url: str | None = None) -> str:
+        """Join an endpoint path onto the base URL, ensuring a trailing slash."""
+        base = base_url or self.base_url
+        base = base if base.endswith('/') else base + '/'
+        return urljoin(base, endpoint.lstrip('/'))
 
     def _get_host_url(self) -> str:
         """Extract the host URL from the configured base_url.
@@ -127,21 +194,12 @@ class SourcePartsClient:
         Raises:
             SourcePartsAPIError: On API errors
         """
-        # Ensure base_url ends with / for proper urljoin behavior
-        effective_base = base_url or self.base_url
-        base = effective_base if effective_base.endswith('/') else effective_base + '/'
-        url = urljoin(base, endpoint.lstrip('/'))
+        url = self._resolve_url(endpoint, base_url)
 
         for attempt in range(retry_count):
             try:
                 # Rate limiting
                 self._rate_limit()
-
-                # Forward MCP user identity if available
-                extra_headers = {}
-                user_sub = _mcp_user_sub.get()
-                if user_sub:
-                    extra_headers["X-MCP-User-Sub"] = user_sub
 
                 # Make request
                 response = self.client.request(
@@ -149,7 +207,7 @@ class SourcePartsClient:
                     url=url,
                     params=params,
                     json=json_data,
-                    headers=extra_headers,
+                    headers=self._context_headers(),
                 )
 
                 # Check for rate limiting
@@ -248,25 +306,15 @@ class SourcePartsClient:
         Raises:
             SourcePartsAPIError: On API errors
         """
-        base = self.base_url if self.base_url.endswith('/') else self.base_url + '/'
-        url = urljoin(base, endpoint.lstrip('/'))
+        url = self._resolve_url(endpoint)
 
         for attempt in range(retry_count):
             try:
                 self._rate_limit()
 
-                extra_headers = {}
-                user_sub = _mcp_user_sub.get()
-                if user_sub:
-                    extra_headers["X-MCP-User-Sub"] = user_sub
-
                 # Use a separate client without Content-Type header so httpx
                 # sets the multipart boundary automatically.
-                upload_headers = {
-                    "Authorization": f"Bearer {self.api_key}",
-                    "User-Agent": "PARTS-MCP/1.0",
-                    **extra_headers,
-                }
+                upload_headers = self._context_headers()
 
                 files = {"file": (filename, file_data, content_type)}
 
@@ -1196,25 +1244,12 @@ class SourcePartsClient:
         Returns:
             API response data
         """
-        base = self.base_url if self.base_url.endswith('/') else self.base_url + '/'
-        url = urljoin(base, 'ingest')
-
+        url = self._resolve_url('ingest')
         file_hash = hashlib.sha256(file_data).hexdigest()
 
         for attempt in range(retry_count):
             try:
                 self._rate_limit()
-
-                extra_headers = {}
-                user_sub = _mcp_user_sub.get()
-                if user_sub:
-                    extra_headers["X-MCP-User-Sub"] = user_sub
-
-                upload_headers = {
-                    "Authorization": f"Bearer {self.api_key}",
-                    "User-Agent": "PARTS-MCP/1.0",
-                    **extra_headers,
-                }
 
                 files = {"file_0": (filename, file_data, content_type)}
                 data = {
@@ -1228,7 +1263,7 @@ class SourcePartsClient:
                     url=url,
                     files=files,
                     data=data,
-                    headers=upload_headers,
+                    headers=self._context_headers(),
                     timeout=SEARCH_TIMEOUT,
                 )
 
@@ -1410,21 +1445,9 @@ class SourcePartsClient:
 
         logger.info(f"Highlighting nets {net_names} on {filename}")
 
-        base = self.base_url if self.base_url.endswith('/') else self.base_url + '/'
-        url = urljoin(base, 'pcb/highlight')
+        url = self._resolve_url('pcb/highlight')
 
         self._rate_limit()
-
-        extra_headers = {}
-        user_sub = _mcp_user_sub.get()
-        if user_sub:
-            extra_headers["X-MCP-User-Sub"] = user_sub
-
-        upload_headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "User-Agent": "PARTS-MCP/1.0",
-            **extra_headers,
-        }
 
         files = {"file": (filename, file_data, "application/octet-stream")}
         data = {
@@ -1441,7 +1464,7 @@ class SourcePartsClient:
                 url=url,
                 files=files,
                 data=data,
-                headers=upload_headers,
+                headers=self._context_headers(),
                 timeout=120,
             )
 
@@ -1500,53 +1523,11 @@ class SourcePartsClient:
             SourcePartsAPIError: On API errors
         """
         logger.info(f"Converting {filename} to KiCad {target_version}")
-
-        base = self.base_url if self.base_url.endswith('/') else self.base_url + '/'
-        url = urljoin(base, 'convert/kicad/version')
-
-        self._rate_limit()
-
-        extra_headers = {}
-        user_sub = _mcp_user_sub.get()
-        if user_sub:
-            extra_headers["X-MCP-User-Sub"] = user_sub
-
-        upload_headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "User-Agent": "PARTS-MCP/1.0",
-            **extra_headers,
-        }
-
-        files = {"file": (filename, file_data, "application/octet-stream")}
-        data = {"target_version": target_version}
-
-        try:
-            response = httpx.request(
-                method="POST",
-                url=url,
-                files=files,
-                data=data,
-                headers=upload_headers,
-                timeout=120,
-            )
-
-            if response.status_code == 401:
-                raise SourcePartsAuthError("Invalid API key")
-            elif response.status_code == 403:
-                raise SourcePartsAuthError("Access forbidden")
-
-            if response.status_code != 200:
-                try:
-                    err = response.json()
-                    detail = err.get("error", err.get("detail", response.text[:500]))
-                except Exception:
-                    detail = response.text[:500]
-                raise SourcePartsAPIError(f"KiCad version conversion failed ({response.status_code}): {detail}")
-
-            return response.content
-
-        except (TimeoutException, RequestError) as e:
-            raise SourcePartsAPIError(f"KiCad version conversion request failed: {e}") from e
+        return self._make_file_conversion(
+            'convert/kicad/version', file_data, filename,
+            form_data={"target_version": target_version},
+            timeout=120, error_prefix="KiCad version conversion",
+        )
 
     def convert_allegro(
         self,
@@ -1573,51 +1554,7 @@ class SourcePartsClient:
             SourcePartsAPIError: On API errors
         """
         logger.info(f"Converting Allegro board: {filename}")
-
-        base = self.base_url if self.base_url.endswith('/') else self.base_url + '/'
-        url = urljoin(base, 'convert/allegro')
-
-        self._rate_limit()
-
-        extra_headers = {}
-        user_sub = _mcp_user_sub.get()
-        if user_sub:
-            extra_headers["X-MCP-User-Sub"] = user_sub
-
-        upload_headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "User-Agent": "PARTS-MCP/1.0",
-            **extra_headers,
-        }
-
-        files = {"file": (filename, file_data, "application/octet-stream")}
-
-        try:
-            response = httpx.request(
-                method="POST",
-                url=url,
-                files=files,
-                headers=upload_headers,
-                timeout=300,
-            )
-
-            if response.status_code == 401:
-                raise SourcePartsAuthError("Invalid API key")
-            elif response.status_code == 403:
-                raise SourcePartsAuthError("Access forbidden")
-
-            if response.status_code != 200:
-                try:
-                    err = response.json()
-                    detail = err.get("error", err.get("detail", response.text[:500]))
-                except Exception:
-                    detail = response.text[:500]
-                raise SourcePartsAPIError(f"Allegro conversion failed ({response.status_code}): {detail}")
-
-            return response.content
-
-        except (TimeoutException, RequestError) as e:
-            raise SourcePartsAPIError(f"Allegro conversion request failed: {e}") from e
+        return self._make_file_conversion('convert/allegro', file_data, filename, error_prefix="Allegro conversion")
 
     def convert_pads(
         self,
@@ -1643,51 +1580,7 @@ class SourcePartsClient:
             SourcePartsAPIError: On API errors
         """
         logger.info(f"Converting PADS layout: {filename}")
-
-        base = self.base_url if self.base_url.endswith('/') else self.base_url + '/'
-        url = urljoin(base, 'convert/pads')
-
-        self._rate_limit()
-
-        extra_headers = {}
-        user_sub = _mcp_user_sub.get()
-        if user_sub:
-            extra_headers["X-MCP-User-Sub"] = user_sub
-
-        upload_headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "User-Agent": "PARTS-MCP/1.0",
-            **extra_headers,
-        }
-
-        files = {"file": (filename, file_data, "application/octet-stream")}
-
-        try:
-            response = httpx.request(
-                method="POST",
-                url=url,
-                files=files,
-                headers=upload_headers,
-                timeout=300,
-            )
-
-            if response.status_code == 401:
-                raise SourcePartsAuthError("Invalid API key")
-            elif response.status_code == 403:
-                raise SourcePartsAuthError("Access forbidden")
-
-            if response.status_code != 200:
-                try:
-                    err = response.json()
-                    detail = err.get("error", err.get("detail", response.text[:500]))
-                except Exception:
-                    detail = response.text[:500]
-                raise SourcePartsAPIError(f"PADS conversion failed ({response.status_code}): {detail}")
-
-            return response.content
-
-        except (TimeoutException, RequestError) as e:
-            raise SourcePartsAPIError(f"PADS conversion request failed: {e}") from e
+        return self._make_file_conversion('convert/pads', file_data, filename, error_prefix="PADS conversion")
 
     def convert_geda(
         self,
@@ -1712,51 +1605,7 @@ class SourcePartsClient:
             SourcePartsAPIError: On API errors
         """
         logger.info(f"Converting gEDA board: {filename}")
-
-        base = self.base_url if self.base_url.endswith('/') else self.base_url + '/'
-        url = urljoin(base, 'convert/geda')
-
-        self._rate_limit()
-
-        extra_headers = {}
-        user_sub = _mcp_user_sub.get()
-        if user_sub:
-            extra_headers["X-MCP-User-Sub"] = user_sub
-
-        upload_headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "User-Agent": "PARTS-MCP/1.0",
-            **extra_headers,
-        }
-
-        files = {"file": (filename, file_data, "application/octet-stream")}
-
-        try:
-            response = httpx.request(
-                method="POST",
-                url=url,
-                files=files,
-                headers=upload_headers,
-                timeout=300,
-            )
-
-            if response.status_code == 401:
-                raise SourcePartsAuthError("Invalid API key")
-            elif response.status_code == 403:
-                raise SourcePartsAuthError("Access forbidden")
-
-            if response.status_code != 200:
-                try:
-                    err = response.json()
-                    detail = err.get("error", err.get("detail", response.text[:500]))
-                except Exception:
-                    detail = response.text[:500]
-                raise SourcePartsAPIError(f"gEDA conversion failed ({response.status_code}): {detail}")
-
-            return response.content
-
-        except (TimeoutException, RequestError) as e:
-            raise SourcePartsAPIError(f"gEDA conversion request failed: {e}") from e
+        return self._make_file_conversion('convert/geda', file_data, filename, error_prefix="gEDA conversion")
 
     def convert_protel(
         self,
@@ -1780,51 +1629,7 @@ class SourcePartsClient:
             SourcePartsAPIError: On API errors
         """
         logger.info(f"Converting Protel project: {filename}")
-
-        base = self.base_url if self.base_url.endswith('/') else self.base_url + '/'
-        url = urljoin(base, 'convert/protel')
-
-        self._rate_limit()
-
-        extra_headers = {}
-        user_sub = _mcp_user_sub.get()
-        if user_sub:
-            extra_headers["X-MCP-User-Sub"] = user_sub
-
-        upload_headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "User-Agent": "PARTS-MCP/1.0",
-            **extra_headers,
-        }
-
-        files = {"file": (filename, file_data, "application/octet-stream")}
-
-        try:
-            response = httpx.request(
-                method="POST",
-                url=url,
-                files=files,
-                headers=upload_headers,
-                timeout=300,
-            )
-
-            if response.status_code == 401:
-                raise SourcePartsAuthError("Invalid API key")
-            elif response.status_code == 403:
-                raise SourcePartsAuthError("Access forbidden")
-
-            if response.status_code != 200:
-                try:
-                    err = response.json()
-                    detail = err.get("error", err.get("detail", response.text[:500]))
-                except Exception:
-                    detail = response.text[:500]
-                raise SourcePartsAPIError(f"Protel conversion failed ({response.status_code}): {detail}")
-
-            return response.content
-
-        except (TimeoutException, RequestError) as e:
-            raise SourcePartsAPIError(f"Protel conversion request failed: {e}") from e
+        return self._make_file_conversion('convert/protel', file_data, filename, error_prefix="Protel conversion")
 
     # =========================================================================
     # Docs Endpoints (/v1/docs)
@@ -1942,24 +1747,27 @@ class SourcePartsClient:
 
 
 def with_user_context(fn):
-    """Decorator for MCP tool handlers — propagates Auth0 sub to API requests."""
+    """Decorator for MCP tool handlers — propagates Auth0 sub and OAuth token to API requests."""
     @wraps(fn)
     async def wrapper(*args, **kwargs):
         try:
             from fastmcp.server.dependencies import get_access_token
             token = get_access_token()
             sub = token.claims.get("sub") if token else None
+            raw_token = token.token if token else None
         except Exception:
             sub = None
+            raw_token = None
 
-        if sub:
-            reset_token = _mcp_user_sub.set(sub)
-            try:
-                return await fn(*args, **kwargs)
-            finally:
-                _mcp_user_sub.reset(reset_token)
-        else:
+        reset_sub = _mcp_user_sub.set(sub) if sub else None
+        reset_tok = _mcp_oauth_token.set(raw_token) if raw_token else None
+        try:
             return await fn(*args, **kwargs)
+        finally:
+            if reset_sub:
+                _mcp_user_sub.reset(reset_sub)
+            if reset_tok:
+                _mcp_oauth_token.reset(reset_tok)
     return wrapper
 
 
