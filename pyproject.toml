@@ -57,7 +57,7 @@ dependencies = [
 "Bug Tracker" = "https://github.com/SourceParts/parts-mcp/issues"
 "Documentation" = "https://source.parts/docs/api"
 "Source" = "https://github.com/SourceParts/parts-mcp"
-"MCP Registry" = "https://registry.modelcontextprotocol.io/servers/io.github.sourceparts/parts-mcp"
+"MCP Registry" = "https://registry.modelcontextprotocol.io/servers/io.github.SourceParts/parts-mcp"
 "Hosted Server" = "https://mcp.source.parts"
 
 [project.optional-dependencies]

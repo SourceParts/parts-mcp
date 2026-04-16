@@ -1,6 +1,6 @@
 # Parts MCP
 
-<!-- mcp-name: io.github.sourceparts/parts-mcp -->
+<!-- mcp-name: io.github.SourceParts/parts-mcp -->
 
 A Model Context Protocol (MCP) server for sourcing electronic parts with multi-EDA integration.
 
@@ -222,7 +222,7 @@ parts_mcp/
 
 ## Marketplace Listings
 
-- [MCP Registry](https://registry.modelcontextprotocol.io/servers/io.github.sourceparts/parts-mcp) - Official MCP server registry
+- [MCP Registry](https://registry.modelcontextprotocol.io/servers/io.github.SourceParts/parts-mcp) - Official MCP server registry
 - [Smithery](https://smithery.ai/server/@sourceparts/parts-mcp) - One-click install marketplace
 - [Hosted Server](https://mcp.source.parts/) - Remote MCP for claude.ai connectors
 
