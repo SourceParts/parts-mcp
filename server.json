@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.sourceparts/parts-mcp",
   "title": "Source Parts",
-  "description": "Electronic component sourcing, BOM management, and PCB design workflows. Search millions of parts, compare prices, check availability, process BOMs from KiCad/Altium/Eagle/Fusion360, and manage ECNs.",
+  "description": "Electronic component sourcing, BOM management, and PCB design workflows.",
   "version": "0.3.0",
   "repository": {
     "url": "https://github.com/SourceParts/parts-mcp",
