@@ -32,7 +32,15 @@ Parts MCP enables AI assistants to search for electronic components, compare pri
 
 ## Installation
 
-### From PyPI (Recommended)
+### Quick Start (Recommended)
+
+```bash
+uvx parts-mcp
+```
+
+No install needed -- `uvx` runs it directly from PyPI in an isolated environment.
+
+### With pip
 
 ```bash
 pip install parts-mcp
@@ -78,8 +86,8 @@ Add to your Claude Desktop configuration file:
 {
   "mcpServers": {
     "parts": {
-      "command": "python",
-      "args": ["-m", "parts_mcp"],
+      "command": "uvx",
+      "args": ["parts-mcp"],
       "env": {
         "SOURCE_PARTS_API_KEY": "your_api_key_here"
       }
@@ -127,8 +135,8 @@ Add to your Claude Code MCP settings (`~/.claude/settings.json`):
 {
   "mcpServers": {
     "parts": {
-      "command": "python",
-      "args": ["-m", "parts_mcp"],
+      "command": "uvx",
+      "args": ["parts-mcp"],
       "env": {
         "SOURCE_PARTS_API_KEY": "your_api_key_here"
       }
