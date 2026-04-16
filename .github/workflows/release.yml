@@ -97,15 +97,22 @@ jobs:
             pip install git+https://github.com/SourceParts/parts-mcp.git@v${{ steps.version.outputs.VERSION }}
             ```
 
-            ## Claude Desktop Configuration
+            ## Claude.ai (Remote)
+
+            Add as a connector in [claude.ai](https://claude.ai) > Settings > Connectors:
+            ```
+            https://mcp.source.parts/
+            ```
+
+            ## Claude Desktop (Local)
 
             Add to your `claude_desktop_config.json`:
             ```json
             {
               "mcpServers": {
                 "parts": {
-                  "command": "python",
-                  "args": ["-m", "parts_mcp"],
+                  "command": "uvx",
+                  "args": ["parts-mcp"],
                   "env": {
                     "SOURCE_PARTS_API_KEY": "your_api_key_here"
                   }
@@ -124,3 +131,39 @@ jobs:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
         run: twine upload dist/* --skip-existing
+
+  registry:
+    needs: release
+    runs-on: ubuntu-latest
+    if: ${{ !contains(github.ref, 'rc') && !contains(github.ref, 'beta') && !contains(github.ref, 'alpha') }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install mcp-publisher
+        run: npm install -g @anthropic-ai/mcp-publisher
+
+      - name: Update version in server.json
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          python3 -c "
+          import json
+          with open('server.json') as f:
+              data = json.load(f)
+          data['version'] = '${VERSION}'
+          for pkg in data.get('packages', []):
+              pkg['version'] = '${VERSION}'
+          with open('server.json', 'w') as f:
+              json.dump(data, f, indent=2)
+              f.write('\n')
+          "
+
+      - name: Publish to MCP Registry
+        run: mcp-publisher publish
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,5 +1,7 @@
 # Parts MCP
 
+<!-- mcp-name: io.github.sourceparts/parts-mcp -->
+
 A Model Context Protocol (MCP) server for sourcing electronic parts with multi-EDA integration.
 
 ## Overview
@@ -104,6 +106,19 @@ If installed from source:
 
 After adding the configuration, restart Claude Desktop.
 
+## Claude.ai Integration (Remote)
+
+Connect directly from [claude.ai](https://claude.ai) without any local installation:
+
+1. Open [claude.ai](https://claude.ai) in your browser
+2. Go to **Settings** > **Connectors**
+3. Click **Add custom connector**
+4. Enter the URL: `https://mcp.source.parts/`
+5. Complete the OAuth sign-in when prompted
+6. Start using Parts tools in any conversation
+
+No API key needed -- authentication is handled via OAuth.
+
 ## Claude Code Integration
 
 Add to your Claude Code MCP settings (`~/.claude/settings.json`):
@@ -204,6 +219,12 @@ parts_mcp/
     ├── cache.py             # Response caching
     └── kicad_utils.py       # KiCad CLI integration
 ```
+
+## Marketplace Listings
+
+- [MCP Registry](https://registry.modelcontextprotocol.io/servers/io.github.sourceparts/parts-mcp) - Official MCP server registry
+- [Smithery](https://smithery.ai/server/@sourceparts/parts-mcp) - One-click install marketplace
+- [Hosted Server](https://mcp.source.parts/) - Remote MCP for claude.ai connectors
 
 ## Links
 

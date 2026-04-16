@@ -1,0 +1,18 @@
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    required:
+      - sourcePartsApiKey
+    properties:
+      sourcePartsApiKey:
+        type: string
+        description: "Source Parts API key (get one at https://source.parts/docs/api)"
+  commandFunction: |-
+    (config) => ({
+      command: "uvx",
+      args: ["parts-mcp"],
+      env: {
+        SOURCE_PARTS_API_KEY: config.sourcePartsApiKey
+      }
+    })
