@@ -16,6 +16,14 @@ from fastmcp import FastMCP
 from parts_mcp.utils.api_client import with_user_context
 from parts_mcp.utils.roles import require_role
 
+
+def setdoc(doc: str):
+    """Decorator that sets __doc__ on the wrapped function before outer decorators read it."""
+    def decorator(fn):
+        fn.__doc__ = doc
+        return fn
+    return decorator
+
 logger = logging.getLogger(__name__)
 
 _PARTS_CLI = os.environ.get("PARTS_CLI_PATH") or shutil.which("parts")
@@ -286,18 +294,7 @@ _CLI_REFERENCE = """
   -h, --help      Help for any command
 """
 
-
-def register_cli_tools(mcp: FastMCP) -> None:
-    """Register the parts CLI bridge tool with the MCP server."""
-
-    @mcp.tool()
-    @with_user_context
-    @require_role("admin")
-    async def parts_cli(
-        command: str,
-        project_path: str | None = None,
-    ) -> dict[str, Any]:
-        f"""Run a `parts` CLI command for local project operations.
+_PARTS_CLI_TOOL_DOC = f"""Run a `parts` CLI command for local project operations.
 
 Executes the `parts` CLI binary with the given command and arguments.
 The command string should NOT include the leading `parts` — just the
@@ -315,6 +312,19 @@ Args:
 Returns:
     Command stdout, stderr, and exit code
 """
+
+
+def register_cli_tools(mcp: FastMCP) -> None:
+    """Register the parts CLI bridge tool with the MCP server."""
+
+    @mcp.tool()
+    @with_user_context
+    @require_role("admin")
+    @setdoc(_PARTS_CLI_TOOL_DOC)
+    async def parts_cli(
+        command: str,
+        project_path: str | None = None,
+    ) -> dict[str, Any]:
         if not _PARTS_CLI:
             return {
                 "error": "parts CLI not found on PATH",

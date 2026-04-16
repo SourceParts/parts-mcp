@@ -37,6 +37,7 @@ class TestSourcePartsClientInit:
                 with caplog.at_level(logging.WARNING, logger='parts_mcp.utils.api_client'):
                     client = SourcePartsClient(api_key="")
         assert any("SOURCE_PARTS_API_KEY" in r.message for r in caplog.records)
+        assert not client.api_key  # no static key — must rely on OAuth token from context
 
     def test_init_uses_correct_base_url(self):
         """Client uses the correct default base URL."""
