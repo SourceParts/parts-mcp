@@ -1,6 +1,7 @@
 {
   "name": "@sourceparts/mcp",
-  "version": "0.2.0",
+  "version": "0.3.2",
+  "mcpName": "io.github.SourceParts/parts-mcp",
   "description": "Source Parts MCP Server - Model Context Protocol integration for Claude",
   "type": "module",
   "main": "dist/index.js",

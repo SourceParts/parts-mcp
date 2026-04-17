@@ -1,0 +1,148 @@
+name: Version Bump
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Version bump type'
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+      prerelease:
+        description: 'Pre-release label (leave empty for stable release)'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Calculate new version
+        id: version
+        run: |
+          CURRENT=$(python3 -c "
+          import re
+          with open('pyproject.toml') as f:
+              m = re.search(r'version\s*=\s*\"(.+?)\"', f.read())
+              print(m.group(1))
+          ")
+          echo "Current version: $CURRENT"
+
+          IFS='.' read -r MAJOR MINOR PATCH <<< "${CURRENT%%-*}"
+
+          case "${{ inputs.bump }}" in
+            major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+            minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+            patch) PATCH=$((PATCH + 1)) ;;
+          esac
+
+          NEW="${MAJOR}.${MINOR}.${PATCH}"
+          if [ -n "${{ inputs.prerelease }}" ]; then
+            NEW="${NEW}-${{ inputs.prerelease }}"
+          fi
+
+          echo "NEW_VERSION=$NEW" >> $GITHUB_OUTPUT
+          echo "New version: $NEW"
+
+      - name: Update version in all files
+        run: |
+          VERSION=${{ steps.version.outputs.NEW_VERSION }}
+
+          # pyproject.toml
+          python3 -c "
+          import re
+          with open('pyproject.toml') as f:
+              content = f.read()
+          content = re.sub(r'(version\s*=\s*\").+?(\")', r'\g<1>${VERSION}\2', content, count=1)
+          with open('pyproject.toml', 'w') as f:
+              f.write(content)
+          "
+
+          # parts_mcp/__init__.py
+          python3 -c "
+          with open('parts_mcp/__init__.py') as f:
+              content = f.read()
+          import re
+          content = re.sub(r'__version__\s*=\s*\".+?\"', '__version__ = \"${VERSION}\"', content)
+          with open('parts_mcp/__init__.py', 'w') as f:
+              f.write(content)
+          "
+
+          # package.json
+          python3 -c "
+          import json
+          with open('package.json') as f:
+              data = json.load(f)
+          data['version'] = '${VERSION}'
+          with open('package.json', 'w') as f:
+              json.dump(data, f, indent=2)
+              f.write('\n')
+          "
+
+          # server.json
+          python3 -c "
+          import json
+          with open('server.json') as f:
+              data = json.load(f)
+          data['version'] = '${VERSION}'
+          for pkg in data.get('packages', []):
+              pkg['version'] = '${VERSION}'
+          with open('server.json', 'w') as f:
+              json.dump(data, f, indent=2)
+              f.write('\n')
+          "
+
+      - name: Verify versions match
+        run: |
+          VERSION=${{ steps.version.outputs.NEW_VERSION }}
+
+          PYPROJECT=$(python3 -c "import re; f=open('pyproject.toml').read(); print(re.search(r'version\s*=\s*\"(.+?)\"', f).group(1))")
+          INIT=$(python3 -c "import re; f=open('parts_mcp/__init__.py').read(); print(re.search(r'__version__\s*=\s*\"(.+?)\"', f).group(1))")
+          PKG=$(python3 -c "import json; print(json.load(open('package.json'))['version'])")
+          SRV=$(python3 -c "import json; print(json.load(open('server.json'))['version'])")
+
+          echo "pyproject.toml: $PYPROJECT"
+          echo "__init__.py:    $INIT"
+          echo "package.json:   $PKG"
+          echo "server.json:    $SRV"
+
+          if [ "$PYPROJECT" != "$VERSION" ] || [ "$INIT" != "$VERSION" ] || [ "$PKG" != "$VERSION" ] || [ "$SRV" != "$VERSION" ]; then
+            echo "::error::Version mismatch detected!"
+            exit 1
+          fi
+
+          echo "All versions match: $VERSION"
+
+      - name: Configure git
+        run: |
+          git config user.name "Parts Bot"
+          git config user.email "bot@bot.source.parts"
+
+      - name: Commit and tag
+        run: |
+          VERSION=${{ steps.version.outputs.NEW_VERSION }}
+          git add pyproject.toml parts_mcp/__init__.py package.json server.json
+          git commit -m "chore: bump version to ${VERSION}"
+          git tag "v${VERSION}"
+
+      - name: Push
+        run: |
+          git push origin main
+          git push origin "v${{ steps.version.outputs.NEW_VERSION }}"

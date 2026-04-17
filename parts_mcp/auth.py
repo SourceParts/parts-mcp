@@ -18,6 +18,7 @@ import logging
 import time
 from contextvars import ContextVar
 from typing import Any
+from urllib.parse import urlparse, urlunparse
 
 from authlib.jose import JsonWebKey, JsonWebToken
 from authlib.jose.errors import JoseError
@@ -180,6 +181,30 @@ class RS256JWTIssuer:
 def load_rsa_private_key(env_value: str) -> bytes:
     """Decode a base64-encoded PEM private key from an env var value."""
     return base64.b64decode(env_value)
+
+
+def _rewrite_claude_code_redirect_uri(uri: str) -> str:
+    """Rewrite portless localhost redirect URIs to port 3118.
+
+    Claude Code 2.1.80+ (CIMD regression #37747) sends redirect_uri=http://localhost/callback
+    or http://127.0.0.1/callback (no port, from the CIMD document at
+    https://claude.ai/oauth/claude-code-client-metadata) but starts its OAuth
+    callback server on port 3118. The browser redirects to port 80 (implicit),
+    nothing is listening there, and Claude Code hangs waiting for the callback.
+
+    We rewrite portless localhost /callback URIs to port 3118 so the callback
+    reaches Claude Code's server correctly.
+    """
+    parsed = urlparse(uri)
+    if (
+        parsed.scheme == "http"
+        and parsed.hostname in ("localhost", "127.0.0.1")
+        and not parsed.port
+        and parsed.path == "/callback"
+    ):
+        new_netloc = f"{parsed.hostname}:3118"
+        return urlunparse(parsed._replace(netloc=new_netloc))
+    return uri
 
 
 def _create_consent_html(
@@ -592,6 +617,13 @@ class SourcePartsOIDCProxy(OIDCProxy):
         We intercept the redirect, extract the destination URL, and instead return
         a branded HTML page that JS-redirects the browser to localhost so Claude
         Code still receives the authorization code.
+
+        Also rewrites portless localhost callback URIs to port 3118 as a workaround
+        for Claude Code CIMD regression #37747: Claude Code 2.1.80+ sends
+        redirect_uri=http://localhost/callback (no port) but listens on port 3118.
+        We only rewrite the final destination URL here, NOT the stored
+        client_redirect_uri, so the token exchange POST (which also sends the
+        portless URI) continues to match.
         """
         from starlette.responses import RedirectResponse
         from fastmcp.utilities.ui import create_secure_html_response
@@ -602,6 +634,8 @@ class SourcePartsOIDCProxy(OIDCProxy):
         # Leave error redirects (data: URLs) and non-localhost URLs unchanged.
         if isinstance(response, RedirectResponse):
             location = response.headers.get("location", "")
+            # Rewrite portless localhost URIs to port 3118 (CIMD regression #37747).
+            location = _rewrite_claude_code_redirect_uri(location)
             if "localhost" in location or "127.0.0.1" in location:
                 logger.info("Serving branded success page before localhost callback redirect")
                 return create_secure_html_response(_create_success_html(callback_url=location))

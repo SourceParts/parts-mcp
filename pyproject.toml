@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "parts-mcp"
-version = "0.2.0"
+version = "0.3.2"
 description = "Model Context Protocol (MCP) server for electronic parts sourcing with KiCad integration"
 readme = "README.md"
 license = { text = "MIT" }
@@ -57,6 +57,8 @@ dependencies = [
 "Bug Tracker" = "https://github.com/SourceParts/parts-mcp/issues"
 "Documentation" = "https://source.parts/docs/api"
 "Source" = "https://github.com/SourceParts/parts-mcp"
+"MCP Registry" = "https://registry.modelcontextprotocol.io/servers/io.github.SourceParts/parts-mcp"
+"Hosted Server" = "https://mcp.source.parts"
 
 [project.optional-dependencies]
 hosted = [

@@ -1,0 +1,38 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.SourceParts/parts-mcp",
+  "title": "Source Parts",
+  "description": "Electronic component sourcing, BOM management, and PCB design workflows.",
+  "version": "0.3.1",
+  "repository": {
+    "url": "https://github.com/SourceParts/parts-mcp",
+    "source": "github"
+  },
+  "websiteUrl": "https://source.parts",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "parts-mcp",
+      "version": "0.3.1",
+      "runtimeHint": "uvx",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "environment",
+          "key": "SOURCE_PARTS_API_KEY",
+          "description": "Source Parts API key (get one at https://source.parts/docs/api)",
+          "isRequired": true,
+          "isSecret": true
+        }
+      ]
+    }
+  ],
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://mcp.source.parts/"
+    }
+  ]
+}
