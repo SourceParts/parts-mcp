@@ -180,6 +180,11 @@ def create_server(server_cfg: ServerConfig, auth_cfg: AuthConfig, storage_cfg: S
     register_ecn_tools(mcp)
     register_eco_tools(mcp)
 
+    # Document safelist + Magika scan tools
+    from parts_mcp.tools.doc_safelist import register_doc_safelist_tools
+    register_doc_safelist_tools(mcp)
+    logger.info("Registered doc safelist tools")
+
     # User profile, preferences, and device management
     from parts_mcp.tools.preferences import register_preference_tools
     register_preference_tools(mcp)
