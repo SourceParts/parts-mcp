@@ -107,7 +107,11 @@ class SourcePartsClient:
 
     def _context_headers(self) -> dict[str, str]:
         """Build auth + identity headers for the current MCP request context."""
-        headers: dict[str, str] = {"Authorization": f"Bearer {self._auth_header()}", "User-Agent": "PARTS-MCP/1.0"}
+        headers: dict[str, str] = {
+            "Authorization": f"Bearer {self._auth_header()}",
+            "User-Agent": "PARTS-MCP/1.0",
+            "X-Forwarded-Proto": "https",
+        }
         user_sub = _mcp_user_sub.get()
         if user_sub:
             headers["X-MCP-User-Sub"] = user_sub
