@@ -659,19 +659,18 @@ class SourcePartsOIDCProxy(OIDCProxy):
 def _create_success_html(callback_url: str) -> str:
     """Branded 'Authentication Successful' page that auto-redirects to the local callback.
 
-    Claude Code runs a local HTTP server (e.g. http://localhost:58560/callback) to
+    Claude Code runs a local HTTP server (e.g. http://localhost:3118/callback) to
     receive the OAuth authorization code.  The base OIDCProxy would do a plain 302
     to that URL, causing the browser to hit localhost and show Claude Code's bare
     "Authentication Successful" page.
 
     Instead we serve this branded page on mcp.source.parts, then redirect the
-    browser to localhost via a <meta http-equiv="refresh"> in <head> so Claude Code
-    still receives the code.
+    browser to localhost so Claude Code still receives the code.
 
-    We write the full HTML ourselves (rather than using create_page) so that the
-    meta-refresh lives in <head> — its proper location — and we can use a tight CSP
-    with no script-src at all.  Meta-refresh is a navigation, not a script or
-    resource fetch, so it is not blocked by default-src 'none'.
+    JS redirect fires synchronously even for backgrounded tabs (unlike meta-refresh,
+    which browsers throttle/delay for inactive tabs — causing Claude Code to time out
+    waiting for the callback and leaving the terminal stuck).  Meta-refresh is kept
+    as a no-JS fallback.
     """
     import html as html_module
 
@@ -679,10 +678,11 @@ def _create_success_html(callback_url: str) -> str:
 
     callback_url_escaped = html_module.escape(callback_url, quote=True)
 
-    # CSP: no scripts, no forms, images only from https.
-    # script-src is intentionally absent — meta-refresh does not need it.
+    # Allow inline script for the JS redirect. The callback URL is localhost-only
+    # and was received from Auth0 over HTTPS, so the XSS risk is negligible here.
     csp = (
         "default-src 'none'; "
+        "script-src 'unsafe-inline'; "
         "style-src 'unsafe-inline'; "
         "img-src https: data:; "
         "base-uri 'none'; "
@@ -695,8 +695,9 @@ def _create_success_html(callback_url: str) -> str:
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Content-Security-Policy" content="{html_module.escape(csp, quote=True)}">
-    <meta http-equiv="refresh" content="0;url={callback_url_escaped}">
+    <meta http-equiv="refresh" content="1;url={callback_url_escaped}">
     <title>Authentication Successful — Source Parts</title>
+    <script>window.location.replace("{callback_url_escaped}");</script>
     <style>
         {BASE_STYLES}
         {BUTTON_STYLES}
