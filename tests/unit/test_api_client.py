@@ -290,3 +290,107 @@ class TestSingletonClient:
                 close_client()
                 client2 = get_client()
                 assert client1 is not client2
+
+
+class TestConvertAllegro:
+    """Tests for SourcePartsClient.convert_allegro."""
+
+    def _make_client(self):
+        with patch('parts_mcp.utils.api_client.httpx.Client'):
+            return SourcePartsClient(api_key="test-api-key")
+
+    def test_successful_conversion_returns_bytes(self):
+        """Returns raw response bytes on HTTP 200."""
+        fake_zip = b"PK\x03\x04fake_zip_content"
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.content = fake_zip
+
+        client = self._make_client()
+        with patch('parts_mcp.utils.api_client.httpx.request', return_value=mock_response):
+            result = client.convert_allegro(b"fake brd data", "board.brd")
+
+        assert result == fake_zip
+
+    def test_auth_error_401(self):
+        """401 raises SourcePartsAuthError."""
+        from parts_mcp.utils.api_client import SourcePartsAuthError
+
+        mock_response = MagicMock()
+        mock_response.status_code = 401
+
+        client = self._make_client()
+        with patch('parts_mcp.utils.api_client.httpx.request', return_value=mock_response):
+            with pytest.raises(SourcePartsAuthError, match="Invalid API key"):
+                client.convert_allegro(b"fake brd data", "board.brd")
+
+    def test_auth_error_403(self):
+        """403 raises SourcePartsAuthError."""
+        from parts_mcp.utils.api_client import SourcePartsAuthError
+
+        mock_response = MagicMock()
+        mock_response.status_code = 403
+
+        client = self._make_client()
+        with patch('parts_mcp.utils.api_client.httpx.request', return_value=mock_response):
+            with pytest.raises(SourcePartsAuthError, match="Access forbidden"):
+                client.convert_allegro(b"fake brd data", "board.brd")
+
+    def test_api_error_on_non_200(self):
+        """Non-200 (e.g. 503) raises SourcePartsAPIError with status code."""
+        from parts_mcp.utils.api_client import SourcePartsAPIError
+
+        mock_response = MagicMock()
+        mock_response.status_code = 503
+        mock_response.json.return_value = {"error": "pcbnew not available"}
+
+        client = self._make_client()
+        with patch('parts_mcp.utils.api_client.httpx.request', return_value=mock_response):
+            with pytest.raises(SourcePartsAPIError, match="503"):
+                client.convert_allegro(b"fake brd data", "board.brd")
+
+    def test_sends_correct_url(self):
+        """Request goes to /v1/convert/allegro."""
+        import httpx as real_httpx
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.content = b"zip"
+
+        client = self._make_client()
+        with patch('parts_mcp.utils.api_client.httpx.request', return_value=mock_response) as mock_req:
+            client.convert_allegro(b"fake brd data", "board.brd")
+
+        call_kwargs = mock_req.call_args
+        assert "convert/allegro" in call_kwargs.kwargs.get("url", "")
+
+    def test_sends_auth_header(self):
+        """Request includes Bearer token Authorization header."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.content = b"zip"
+
+        client = self._make_client()
+        with patch('parts_mcp.utils.api_client.httpx.request', return_value=mock_response) as mock_req:
+            client.convert_allegro(b"fake brd data", "board.brd")
+
+        headers = mock_req.call_args.kwargs.get("headers", {})
+        assert "Authorization" in headers
+        assert "Bearer" in headers["Authorization"]
+
+    def test_sends_file_as_multipart(self):
+        """The .brd bytes are sent as a multipart file upload."""
+        fake_data = b"allegro board bytes"
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.content = b"zip"
+
+        client = self._make_client()
+        with patch('parts_mcp.utils.api_client.httpx.request', return_value=mock_response) as mock_req:
+            client.convert_allegro(fake_data, "myboard.brd")
+
+        files = mock_req.call_args.kwargs.get("files", {})
+        assert "file" in files
+        name, data, mime = files["file"]
+        assert name == "myboard.brd"
+        assert data == fake_data
