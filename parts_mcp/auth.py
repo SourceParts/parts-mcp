@@ -58,6 +58,7 @@ class RS256JWTIssuer:
         issuer: str,
         audience: str,
         rsa_private_key_pem: bytes,
+        access_token_ttl: int = 7 * 24 * 3600,
     ):
         self.issuer = issuer
         self.audience = audience
@@ -86,6 +87,7 @@ class RS256JWTIssuer:
         )
 
         self._jwt = JsonWebToken(["RS256"])
+        self._access_token_ttl = access_token_ttl
 
     def issue_access_token(
         self,
@@ -101,7 +103,7 @@ class RS256JWTIssuer:
             "aud": self.audience,
             "client_id": client_id,
             "scope": " ".join(scopes),
-            "exp": now + expires_in,
+            "exp": now + self._access_token_ttl,
             "iat": now,
             "jti": jti,
         }
@@ -367,10 +369,12 @@ class SourcePartsOIDCProxy(OIDCProxy):
         self,
         *,
         rsa_private_key_pem: bytes,
+        access_token_ttl: int = 7 * 24 * 3600,
         valid_scopes: list[str] | None = None,
         **kwargs,
     ):
         self._rsa_private_key_pem = rsa_private_key_pem
+        self._access_token_ttl = access_token_ttl
         super().__init__(**kwargs)
 
         # OIDCProxy doesn't pass valid_scopes to OAuthProxy, so
@@ -392,6 +396,7 @@ class SourcePartsOIDCProxy(OIDCProxy):
             issuer=str(self.base_url),
             audience=str(self._resource_url),
             rsa_private_key_pem=self._rsa_private_key_pem,
+            access_token_ttl=self._access_token_ttl,
         )
         logger.info(
             "Configured RS256 OAuth proxy for resource URL: %s", self._resource_url
@@ -625,8 +630,8 @@ class SourcePartsOIDCProxy(OIDCProxy):
         client_redirect_uri, so the token exchange POST (which also sends the
         portless URI) continues to match.
         """
-        from starlette.responses import RedirectResponse
         from fastmcp.utilities.ui import create_secure_html_response
+        from starlette.responses import RedirectResponse
 
         response = await super()._handle_idp_callback(request)
 

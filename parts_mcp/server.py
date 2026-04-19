@@ -89,6 +89,7 @@ def _create_auth(auth_cfg: AuthConfig, storage_cfg: StorageConfig):
 
             proxy = SourcePartsOIDCProxy(
                 rsa_private_key_pem=rsa_pem,
+                access_token_ttl=auth_cfg.access_token_ttl,
                 valid_scopes=["openid", "profile", "email", "offline_access"],
                 config_url=auth_cfg.config_url,
                 client_id=auth_cfg.client_id,
@@ -109,6 +110,7 @@ def _create_auth(auth_cfg: AuthConfig, storage_cfg: StorageConfig):
                 issuer="",
                 audience="",
                 rsa_private_key_pem=rsa_pem,
+                access_token_ttl=auth_cfg.access_token_ttl,
             )
 
             logger.info("Created SourcePartsOIDCProxy with RS256 JWT signing")
