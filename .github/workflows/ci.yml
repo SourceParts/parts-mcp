@@ -53,3 +53,30 @@ jobs:
       - name: Run type checking
         run: mypy parts_mcp --ignore-missing-imports
         continue-on-error: true
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: '3.12'
+
+      - name: Export resolved requirements
+        run: |
+          uv sync --all-extras --frozen
+          uv export --no-hashes --format requirements-txt --all-extras \
+            | grep -v "^-e" > reqs.txt
+
+      # Suppressions are documented in SECURITY.md. Remove each
+      # --ignore-vuln flag once the corresponding upstream patch ships
+      # and the dependency is bumped.
+      - name: Run pip-audit
+        run: |
+          uvx pip-audit -r reqs.txt --disable-pip --no-deps \
+            --ignore-vuln CVE-2025-69872 \
+            --ignore-vuln CVE-2026-34444 \
+            --ignore-vuln CVE-2025-64340 \
+            --ignore-vuln CVE-2026-27124

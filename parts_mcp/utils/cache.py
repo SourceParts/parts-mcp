@@ -2,7 +2,8 @@
 Caching utilities for Parts MCP using diskcache.
 
 Uses JSONDisk instead of the default pickle-based Disk to avoid
-pickle deserialization vulnerabilities (CVE-2025-69872).
+pickle deserialization vulnerabilities (CVE-2025-69872). See
+SECURITY.md at the repo root for details.
 """
 import asyncio
 import hashlib
