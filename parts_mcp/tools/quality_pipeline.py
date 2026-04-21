@@ -11,7 +11,6 @@ Pipeline:
   3. quality_fai_inspect      — first article inspection vs BOM
   4. quality_compliance_check — RoHS/REACH/conflict-minerals check
 """
-import json
 import logging
 import os
 from typing import Any
@@ -61,8 +60,9 @@ def register_quality_pipeline_tools(mcp: FastMCP) -> None:
                 if not os.path.exists(path):
                     return {"error": f"Photo not found: {path}"}
 
-            import httpx
             from urllib.parse import urljoin
+
+            import httpx
 
             base = client.base_url if client.base_url.endswith('/') else client.base_url + '/'
             url = urljoin(base, "quality/iqc/inspect")
@@ -163,8 +163,9 @@ def register_quality_pipeline_tools(mcp: FastMCP) -> None:
                 if not os.path.exists(path):
                     return {"error": f"X-ray image not found: {path}"}
 
-            import httpx
             from urllib.parse import urljoin
+
+            import httpx
 
             base = client.base_url if client.base_url.endswith('/') else client.base_url + '/'
             url = urljoin(base, "quality/xray/analyze")
@@ -269,8 +270,9 @@ def register_quality_pipeline_tools(mcp: FastMCP) -> None:
             if not os.path.exists(bom_path):
                 return {"error": f"BOM file not found: {bom_path}"}
 
-            import httpx
             from urllib.parse import urljoin
+
+            import httpx
 
             base = client.base_url if client.base_url.endswith('/') else client.base_url + '/'
             url = urljoin(base, "quality/fai/inspect")

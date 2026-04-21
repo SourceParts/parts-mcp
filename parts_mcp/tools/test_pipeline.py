@@ -16,7 +16,6 @@ Post-Production Pipeline:
   5. failure_analysis           — Pareto analysis + lot correlation
   6. eco_feedback               — ECN suggestions from failure patterns
 """
-import json
 import logging
 import os
 from typing import Any
@@ -69,8 +68,9 @@ def register_test_pipeline_tools(mcp: FastMCP) -> None:
             with open(pcb_path, "rb") as f:
                 pcb_data = f.read()
 
-            import httpx
             from urllib.parse import urljoin
+
+            import httpx
 
             base = client.base_url if client.base_url.endswith('/') else client.base_url + '/'
             url = urljoin(base, "test/coverage")

@@ -9,6 +9,7 @@ from typing import Any
 from fastmcp import FastMCP
 
 from parts_mcp.config import KICAD_SEARCH_PATHS
+from parts_mcp.utils.api_client import SourcePartsAPIError, get_client
 from parts_mcp.utils.bom_parser import analyze_bom_data, parse_bom_file
 from parts_mcp.utils.kicad_utils import (
     extract_project_info,
@@ -24,7 +25,6 @@ from parts_mcp.utils.netlist_parser import (
     analyze_connectivity,
     extract_netlist_from_schematic,
 )
-from parts_mcp.utils.api_client import SourcePartsAPIError, get_client
 from parts_mcp.utils.pcb_highlight import highlight_nets
 
 logger = logging.getLogger(__name__)

@@ -74,8 +74,9 @@ def register_assembly_pipeline_tools(mcp: FastMCP) -> None:
             )
 
             # The readiness endpoint needs all three files — use httpx directly
-            import httpx
             from urllib.parse import urljoin
+
+            import httpx
 
             base = client.base_url if client.base_url.endswith('/') else client.base_url + '/'
             url = urljoin(base, "assembly/readiness")
@@ -162,8 +163,9 @@ def register_assembly_pipeline_tools(mcp: FastMCP) -> None:
             with open(position_path, "rb") as f:
                 position_data = f.read()
 
-            import httpx
             from urllib.parse import urljoin
+
+            import httpx
 
             base = client.base_url if client.base_url.endswith('/') else client.base_url + '/'
             url = urljoin(base, "assembly/feeder-setup")
@@ -326,8 +328,9 @@ def register_assembly_pipeline_tools(mcp: FastMCP) -> None:
             if reference_image and not os.path.exists(reference_image):
                 return {"error": f"Reference image not found: {reference_image}"}
 
-            import httpx
             from urllib.parse import urljoin
+
+            import httpx
 
             base = client.base_url if client.base_url.endswith('/') else client.base_url + '/'
             url = urljoin(base, "assembly/aoi")

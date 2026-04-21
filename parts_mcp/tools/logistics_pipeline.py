@@ -375,8 +375,9 @@ def register_logistics_pipeline_tools(mcp: FastMCP) -> None:
             with open(system_inventory_path, "rb") as f:
                 system_data = f.read()
 
-            import httpx
             from urllib.parse import urljoin
+
+            import httpx
 
             base = client.base_url if client.base_url.endswith('/') else client.base_url + '/'
             url = urljoin(base, "logistics/inventory/reconcile")

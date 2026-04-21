@@ -21,7 +21,6 @@ from typing import Any
 from fastmcp import FastMCP
 
 from parts_mcp.utils.api_client import get_client, with_user_context
-from parts_mcp.utils.kicad_utils import find_kicad_projects, get_project_files
 from parts_mcp.utils.roles import require_role
 
 logger = logging.getLogger(__name__)
