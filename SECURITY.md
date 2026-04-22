@@ -70,6 +70,8 @@ migration PR.
   `fastmcp>=2.13.0,<3.0.0` because the 2.x → 3.x jump has breaking
   changes (the `fastmcp.utilities.ui` import path moved and the
   decorator / registration API was refactored).
-- **Plan:** Tracked as a separate migration task. Once `fastmcp 3.x` is
-  adopted, bump the pin, run the full test suite, and remove both
-  `--ignore-vuln` flags for these IDs from `.github/workflows/ci.yml`.
+- **Plan:** Tracked in
+  [issue #1](https://github.com/SourceParts/parts-mcp/issues/1) with a
+  researched migration checklist. Once `fastmcp 3.x` is adopted, bump
+  the pin, run the full test suite, and remove both `--ignore-vuln`
+  flags for these IDs from `.github/workflows/ci.yml`.
