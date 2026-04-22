@@ -1,9 +1,9 @@
-"""
-Caching utilities for Parts MCP using diskcache.
+"""Caching utilities for Parts MCP.
 
-Uses JSONDisk instead of the default pickle-based Disk to avoid
-pickle deserialization vulnerabilities (CVE-2025-69872). See
-SECURITY.md at the repo root for details.
+Uses an in-process TTL cache (`parts_mcp.utils._ttl_cache.TTLCache`).
+The previous backend was `diskcache`, which was removed to drop
+CVE-2025-69872 and its transitive surface. No persistence across
+restarts — see `_ttl_cache.py` for the rationale.
 """
 import asyncio
 import hashlib
@@ -13,15 +13,12 @@ from collections.abc import Callable
 from functools import wraps
 from typing import Any
 
-import diskcache
-
 from parts_mcp.config import CACHE_DIR, CACHE_EXPIRY_HOURS
+from parts_mcp.utils._ttl_cache import TTLCache
 
 logger = logging.getLogger(__name__)
 
-# Initialize cache with JSON serialization instead of pickle.
-# All cached values are API response dicts (JSON-safe).
-cache = diskcache.Cache(str(CACHE_DIR), disk=diskcache.JSONDisk, disk_compress_level=6)
+cache = TTLCache()
 
 # Cache expiry in seconds
 DEFAULT_EXPIRY = CACHE_EXPIRY_HOURS * 3600
