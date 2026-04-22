@@ -76,7 +76,4 @@ jobs:
       - name: Run pip-audit
         run: |
           uvx pip-audit -r reqs.txt --disable-pip --no-deps \
-            --ignore-vuln CVE-2025-69872 \
-            --ignore-vuln CVE-2026-34444 \
-            --ignore-vuln CVE-2025-64340 \
-            --ignore-vuln CVE-2026-27124
+            --ignore-vuln CVE-2025-69872

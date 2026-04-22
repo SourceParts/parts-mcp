@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "parts-mcp"
-version = "0.3.4"
+version = "0.4.0"
 description = "Model Context Protocol (MCP) server for electronic parts sourcing with KiCad integration"
 readme = "README.md"
 license = { text = "MIT" }
@@ -42,7 +42,7 @@ classifiers = [
 requires-python = ">=3.10"
 dependencies = [
     "mcp[cli]>=1.0.0",
-    "fastmcp>=2.13.0,<3.0.0",
+    "fastmcp>=3.2.1",
     "httpx>=0.25.0",
     "pydantic>=2.0.0",
     "python-dotenv>=1.0.0",
