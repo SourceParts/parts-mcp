@@ -43,35 +43,13 @@ lands and the dependency is bumped.
 - **Upstream tracking:**
   https://github.com/grantjenks/python-diskcache/issues/357
 
-### CVE-2026-34444 — `lupa`
+## Resolved
 
-- **Issue:** Sandbox escape in `LuaRuntime` via `getattr`/`setattr`
-  bypassing `attribute_filter`. CVSS 7.9, remote attack vector where the
-  server runs attacker-supplied Lua code.
-- **Why it does not apply:** `parts-mcp` never imports `lupa` and never
-  instantiates a `LuaRuntime`. Confirm with
-  `grep -r "lupa\|LuaRuntime" parts_mcp/` (expected: no matches). The
-  package is present transitively because of the chain
-  `fastmcp` → `pydocket` → `fakeredis[lua]` → `lupa`, where `fakeredis`
-  uses Lua only inside its own internal `EVAL` simulation during tests.
-  No attacker-controlled Lua reaches any runtime in our process.
-- **Upstream tracking:** https://github.com/advisories/GHSA-69v7-xpr6-6gjm
+Entries below were previously suppressed and have since been eliminated
+from the dependency tree. Kept here as an audit trail.
 
-## Accepted Risk — Pending Migration
-
-The CVEs below have upstream patches but those patches live in a major
-version we have not migrated to yet. They are suppressed in CI to keep
-the `security` job actionable; remove each suppression as part of the
-migration PR.
-
-### CVE-2025-64340, CVE-2026-27124 — `fastmcp`
-
-- **Status:** Patched in `fastmcp 3.2.0`. Our `pyproject.toml` pins
-  `fastmcp>=2.13.0,<3.0.0` because the 2.x → 3.x jump has breaking
-  changes (the `fastmcp.utilities.ui` import path moved and the
-  decorator / registration API was refactored).
-- **Plan:** Tracked in
-  [issue #1](https://github.com/SourceParts/parts-mcp/issues/1) with a
-  researched migration checklist. Once `fastmcp 3.x` is adopted, bump
-  the pin, run the full test suite, and remove both `--ignore-vuln`
-  flags for these IDs from `.github/workflows/ci.yml`.
+- **CVE-2025-64340, CVE-2026-27124 (`fastmcp`)** — resolved by the
+  2.14.5 → 3.2.4 migration ([issue #1](https://github.com/SourceParts/parts-mcp/issues/1)).
+- **CVE-2026-34444 (`lupa`)** — resolved as a side effect of the
+  fastmcp 3.x migration; `fastmcp` 3.x no longer pulls in `pydocket`,
+  so `fakeredis[lua]` and `lupa` are no longer in the tree.
