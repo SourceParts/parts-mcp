@@ -85,17 +85,6 @@ jobs:
               f.write(content)
           "
 
-          # package.json
-          python3 -c "
-          import json
-          with open('package.json') as f:
-              data = json.load(f)
-          data['version'] = '${VERSION}'
-          with open('package.json', 'w') as f:
-              json.dump(data, f, indent=2)
-              f.write('\n')
-          "
-
           # server.json
           python3 -c "
           import json
@@ -115,15 +104,13 @@ jobs:
 
           PYPROJECT=$(python3 -c "import re; f=open('pyproject.toml').read(); print(re.search(r'version\s*=\s*\"(.+?)\"', f).group(1))")
           INIT=$(python3 -c "import re; f=open('parts_mcp/__init__.py').read(); print(re.search(r'__version__\s*=\s*\"(.+?)\"', f).group(1))")
-          PKG=$(python3 -c "import json; print(json.load(open('package.json'))['version'])")
           SRV=$(python3 -c "import json; print(json.load(open('server.json'))['version'])")
 
           echo "pyproject.toml: $PYPROJECT"
           echo "__init__.py:    $INIT"
-          echo "package.json:   $PKG"
           echo "server.json:    $SRV"
 
-          if [ "$PYPROJECT" != "$VERSION" ] || [ "$INIT" != "$VERSION" ] || [ "$PKG" != "$VERSION" ] || [ "$SRV" != "$VERSION" ]; then
+          if [ "$PYPROJECT" != "$VERSION" ] || [ "$INIT" != "$VERSION" ] || [ "$SRV" != "$VERSION" ]; then
             echo "::error::Version mismatch detected!"
             exit 1
           fi
@@ -138,7 +125,7 @@ jobs:
       - name: Commit and tag
         run: |
           VERSION=${{ steps.version.outputs.NEW_VERSION }}
-          git add pyproject.toml parts_mcp/__init__.py package.json server.json
+          git add pyproject.toml parts_mcp/__init__.py server.json
           git commit -m "chore: bump version to ${VERSION}"
           git tag "v${VERSION}"
 

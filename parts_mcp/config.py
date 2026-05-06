@@ -84,6 +84,7 @@ class AuthConfig:
     issuer_url: str | None
     redirect_path: str | None
     jwt_signing_key: str | None
+    access_token_ttl: int = 7 * 24 * 3600  # 7 days; configurable via MCP_ACCESS_TOKEN_TTL
 
     @property
     def has_rsa_key(self) -> bool:
@@ -123,6 +124,7 @@ def load_auth_config() -> AuthConfig:
         issuer_url=os.getenv(f"{p}ISSUER_URL"),
         redirect_path=os.getenv(f"{p}REDIRECT_PATH"),
         jwt_signing_key=os.getenv(f"{p}JWT_SIGNING_KEY"),
+        access_token_ttl=int(os.getenv("MCP_ACCESS_TOKEN_TTL", str(7 * 24 * 3600))),
     )
 
 

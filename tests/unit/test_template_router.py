@@ -1,7 +1,6 @@
 """Tests for the Blender template router."""
 from parts_mcp.utils.template_router import resolve_template
 
-
 YAGEO_471KD20TR = {
     "part_id": "sp_00a7f3e2",
     "sku": "SP-YAGEO-471KD20TR",

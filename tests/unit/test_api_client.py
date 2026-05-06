@@ -351,7 +351,6 @@ class TestConvertAllegro:
 
     def test_sends_correct_url(self):
         """Request goes to /v1/convert/allegro."""
-        import httpx as real_httpx
 
         mock_response = MagicMock()
         mock_response.status_code = 200

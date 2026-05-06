@@ -14,7 +14,6 @@ Admin-only tools:
   5. dfm_generate_report  — generate PDF report + email
   6. dfm_deliver_report   — re-send report to customer
 """
-import json
 import logging
 import os
 from typing import Any

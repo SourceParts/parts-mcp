@@ -10,7 +10,6 @@ Pipeline:
   2. design_impedance_calculate — controlled-impedance calculation
   3. design_thermal_analysis    — BOM-based thermal analysis
 """
-import json
 import logging
 import os
 from typing import Any
@@ -170,11 +169,11 @@ def register_design_pipeline_tools(mcp: FastMCP) -> None:
                 f"Width: {trace_width} mm",
                 f"Dielectric: Er={stackup.get('dielectric_constant', 0)}, "
                 f"H={stackup.get('dielectric_height_mm', 0)} mm",
-                f"",
+                "",
                 f"Impedance: {z} ohm",
                 f"Delay: {delay} ps/mm",
                 f"Loss: {loss} dB/mm",
-                f"",
+                "",
                 f"Recommendation: {rec}",
             ]
 

@@ -6,7 +6,8 @@ Every route entry defines a match predicate and a params_fn that extracts
 Blender-specific parameters from the part record.
 """
 import re
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 RouteMatch = dict[str, str | None]
 ParamsFn = Callable[[dict[str, Any]], dict[str, Any]]
