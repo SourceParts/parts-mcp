@@ -1,3 +1,3 @@
 """Parts MCP - Model Context Protocol server for electronic parts sourcing."""
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"
