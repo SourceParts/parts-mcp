@@ -175,6 +175,11 @@ def create_server(server_cfg: ServerConfig, auth_cfg: AuthConfig, storage_cfg: S
     register_render_tools(mcp)
     logger.info("Registered render pipeline tools")
 
+    # CAD pipeline tools (cadquery + build123d parametric STEP edits)
+    from parts_mcp.tools.cad import register_cad_tools
+    register_cad_tools(mcp)
+    logger.info("Registered CAD pipeline tools")
+
     # ECN + ECO tools are remote-only (API-backed). For local operations,
     # clients should use the `parts` CLI directly.
     from parts_mcp.tools.ecn import register_ecn_tools
