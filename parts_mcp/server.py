@@ -192,6 +192,16 @@ def create_server(server_cfg: ServerConfig, auth_cfg: AuthConfig, storage_cfg: S
     register_doc_safelist_tools(mcp)
     logger.info("Registered doc safelist tools")
 
+    # WiP engineering report tools (parts doc wip mirror)
+    from parts_mcp.tools.wip import register_wip_tools
+    register_wip_tools(mcp)
+    logger.info("Registered doc_wip tools")
+
+    # Altium→KiCad ERC repair tools (parts sch check/clean/libsync mirror)
+    from parts_mcp.tools.sch_repair import register_sch_repair_tools
+    register_sch_repair_tools(mcp)
+    logger.info("Registered sch_repair tools")
+
     # User profile, preferences, and device management
     from parts_mcp.tools.preferences import register_preference_tools
     register_preference_tools(mcp)
