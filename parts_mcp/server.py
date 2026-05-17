@@ -175,6 +175,11 @@ def create_server(server_cfg: ServerConfig, auth_cfg: AuthConfig, storage_cfg: S
     register_render_tools(mcp)
     logger.info("Registered render pipeline tools")
 
+    # CAD pipeline tools (cadquery + build123d parametric STEP edits)
+    from parts_mcp.tools.cad import register_cad_tools
+    register_cad_tools(mcp)
+    logger.info("Registered CAD pipeline tools")
+
     # ECN + ECO tools are remote-only (API-backed). For local operations,
     # clients should use the `parts` CLI directly.
     from parts_mcp.tools.ecn import register_ecn_tools
@@ -186,6 +191,16 @@ def create_server(server_cfg: ServerConfig, auth_cfg: AuthConfig, storage_cfg: S
     from parts_mcp.tools.doc_safelist import register_doc_safelist_tools
     register_doc_safelist_tools(mcp)
     logger.info("Registered doc safelist tools")
+
+    # WiP engineering report tools (parts doc wip mirror)
+    from parts_mcp.tools.wip import register_wip_tools
+    register_wip_tools(mcp)
+    logger.info("Registered doc_wip tools")
+
+    # Altium→KiCad ERC repair tools (parts sch check/clean/libsync mirror)
+    from parts_mcp.tools.sch_repair import register_sch_repair_tools
+    register_sch_repair_tools(mcp)
+    logger.info("Registered sch_repair tools")
 
     # User profile, preferences, and device management
     from parts_mcp.tools.preferences import register_preference_tools
