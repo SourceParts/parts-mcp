@@ -95,6 +95,7 @@ class RS256JWTIssuer:
         scopes: list[str],
         jti: str,
         expires_in: int = 3600,
+        upstream_claims: dict[str, Any] | None = None,
     ) -> str:
         now = int(time.time())
         header = {"alg": "RS256", "typ": "JWT", "kid": self._kid}
@@ -108,9 +109,10 @@ class RS256JWTIssuer:
             "jti": jti,
         }
 
-        # Merge Auth0 user identity (sub, email) if available.
-        # Set by SourcePartsOIDCProxy during OAuth code exchange.
-        extra = _auth0_user_claims.get()
+        # Merge Auth0 user identity (sub, email) if available. fastmcp 3.4.2+
+        # passes upstream_claims here directly; fall back to the contextvar set
+        # by SourcePartsOIDCProxy during OAuth code exchange for older paths.
+        extra = upstream_claims or _auth0_user_claims.get()
         if extra:
             if extra.get("sub"):
                 payload["sub"] = extra["sub"]
@@ -134,6 +136,7 @@ class RS256JWTIssuer:
         scopes: list[str],
         jti: str,
         expires_in: int,
+        upstream_claims: dict[str, Any] | None = None,
     ) -> str:
         now = int(time.time())
         header = {"alg": "RS256", "typ": "JWT", "kid": self._kid}
