@@ -922,6 +922,58 @@ class SourcePartsClient:
     # Datasheet Endpoints
     # =========================================================================
 
+    # =========================================================================
+    # Async EDA file conversion (Altium → KiCad).
+    # =========================================================================
+
+    def convert_altium_start(
+        self,
+        file_data: bytes,
+        filename: str,
+        target_version: str = "10",
+    ) -> dict[str, Any]:
+        """POST a project zip to /v1/convert/altium. Returns {job_id, ...}.
+
+        Args:
+            file_data: Raw zip bytes (.PrjPcb / .SchDoc / .PcbDoc / .zip)
+            filename: Original filename — used for content-disposition only
+            target_version: KiCad target ("7" / "8" / "9" / "10"; default "10")
+        """
+        logger.info(
+            f"Starting Altium conversion: {filename} (target_version={target_version})"
+        )
+        try:
+            return self._make_upload_request(
+                "/convert/altium",
+                file_data=file_data,
+                filename=filename,
+                content_type="application/zip",
+                form_fields={"target_version": target_version},
+            )
+        except Exception as e:
+            logger.error(f"Altium conversion start failed: {e}")
+            raise
+
+    def convert_job_status(self, job_id: str) -> dict[str, Any]:
+        """GET /v1/convert/jobs/<id>. Includes presigned output_url on success."""
+        try:
+            return self._make_request("GET", f"/convert/jobs/{job_id}")
+        except Exception as e:
+            logger.error(f"Convert job status failed: {e}")
+            raise
+
+    def convert_job_pin(self, job_id: str, project_id: str) -> dict[str, Any]:
+        """POST /v1/convert/jobs/<id>/pin. Attaches the output to a project."""
+        try:
+            return self._make_request(
+                "POST",
+                f"/convert/jobs/{job_id}/pin",
+                json_data={"project_id": project_id},
+            )
+        except Exception as e:
+            logger.error(f"Convert job pin failed: {e}")
+            raise
+
     def chunk_datasheet(
         self,
         file_data: bytes,

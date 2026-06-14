@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "parts-mcp"
-version = "0.4.0"
+version = "0.4.1"
 description = "Model Context Protocol (MCP) server for electronic parts sourcing with KiCad integration"
 readme = "README.md"
 license = { text = "MIT" }
@@ -46,7 +46,6 @@ dependencies = [
     "httpx>=0.25.0",
     "pydantic>=2.0.0",
     "python-dotenv>=1.0.0",
-    "diskcache>=5.0.0",
     "pandas>=2.0.0",
     "defusedxml>=0.7.0",
     "pyyaml>=6.0",
@@ -114,7 +113,6 @@ strict_equality = true
 module = [
     "pandas.*",
     "mcp.*",
-    "diskcache.*",
 ]
 ignore_missing_imports = true
 

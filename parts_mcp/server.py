@@ -23,6 +23,7 @@ from parts_mcp.config import (
 from parts_mcp.prompts.templates import register_prompts
 from parts_mcp.resources.parts import register_parts_resources
 from parts_mcp.resources.suppliers import register_supplier_resources
+from parts_mcp.tools.convert import register_convert_tools
 from parts_mcp.tools.datasheet import register_datasheet_tools
 from parts_mcp.tools.docs import register_docs_tools
 from parts_mcp.tools.manufacturing import register_manufacturing_tools
@@ -168,6 +169,7 @@ def create_server(server_cfg: ServerConfig, auth_cfg: AuthConfig, storage_cfg: S
     register_sourcing_tools(mcp)
     register_manufacturing_tools(mcp, local_mode=not hosted)
     register_datasheet_tools(mcp, local_mode=not hosted)
+    register_convert_tools(mcp, local_mode=not hosted)
     register_docs_tools(mcp)
 
     # Render pipeline tools (Blender headless render)

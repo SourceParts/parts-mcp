@@ -250,12 +250,13 @@ def clean_cache():
 
 @pytest.fixture
 def mock_cache(tmp_path):
-    """Use a temporary cache directory for tests."""
-    import diskcache
-    test_cache = diskcache.Cache(str(tmp_path / "test_cache"))
+    """Isolated in-process cache for tests. `tmp_path` is unused but kept
+    in the signature so existing tests that request it still work."""
+    del tmp_path
+    from parts_mcp.utils._ttl_cache import TTLCache
+    test_cache = TTLCache()
     with patch('parts_mcp.utils.cache.cache', test_cache):
         yield test_cache
-    test_cache.close()
 
 
 # ============================================================================

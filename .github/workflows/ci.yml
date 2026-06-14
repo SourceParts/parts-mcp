@@ -70,10 +70,6 @@ jobs:
           uv export --no-hashes --format requirements-txt --all-extras \
             | grep -v "^-e" > reqs.txt
 
-      # Suppressions are documented in SECURITY.md. Remove each
-      # --ignore-vuln flag once the corresponding upstream patch ships
-      # and the dependency is bumped.
       - name: Run pip-audit
         run: |
-          uvx pip-audit -r reqs.txt --disable-pip --no-deps \
-            --ignore-vuln CVE-2025-69872
+          uvx pip-audit -r reqs.txt --disable-pip --no-deps
