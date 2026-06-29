@@ -1044,6 +1044,16 @@ class SourcePartsClient:
             logger.error(f"DFM submission failed: {e}")
             raise
 
+    def get_fab_quote(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Get cross-vendor PCB fab quotes + cost-driver breakdown + optimization
+        tips for explicit board params (POST /v1/fab/quote, JSON mode)."""
+        logger.info("Requesting fab quote")
+        try:
+            return self._make_request('POST', '/fab/quote', json_data=params)
+        except Exception as e:
+            logger.error(f"Fab quote failed: {e}")
+            raise
+
     def upload_dfm(
         self,
         file_data: bytes,

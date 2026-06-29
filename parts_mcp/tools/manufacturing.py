@@ -78,6 +78,65 @@ def register_manufacturing_tools(mcp: FastMCP, local_mode: bool = True) -> None:
 
     @mcp.tool()
     @with_user_context
+    async def pcb_fab_quote(
+        layers: int = 2,
+        width_mm: float = 100.0,
+        height_mm: float = 100.0,
+        qty: int = 5,
+        finish: str = "HASL",
+        color: str = "green",
+        copper_oz: int = 1,
+        thickness_mm: float = 1.6,
+        via_in_pad: bool = False,
+        castellated: bool = False,
+        min_trace_mm: float | None = None,
+        vendors: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Instant cross-vendor PCB fab quote with a cost-driver breakdown and
+        ranked cost-optimization tips (JLCPCB, PCBWay).
+
+        Replicates the vendors' price calculators so you can optimize board cost
+        from the start — see exactly what each feature (layers, ENIG, 2oz copper,
+        castellated edges, soldermask color, fine traces) adds, and what to change
+        to save money. Board fee only (excludes shipping + tariffs).
+
+        Args:
+            layers: Copper layer count (1, 2, 4, 6, 8 …).
+            width_mm, height_mm: Board dimensions in mm.
+            qty: Number of boards.
+            finish: Surface finish — HASL, HASL_leadfree, ENIG, OSP, …
+            color: Soldermask color (green is cheapest/fastest).
+            copper_oz: Outer copper weight (1 or 2).
+            thickness_mm: Board thickness in mm.
+            via_in_pad: Resin-filled / capped via-in-pad.
+            castellated: Castellated (half-plated) edges.
+            min_trace_mm: Min trace/space in mm (e.g. 0.0889 = 3.5mil); finer can surcharge.
+            vendors: Restrict to these vendor slugs (default all, e.g. ["jlcpcb", "pcbway"]).
+
+        Returns:
+            Per-vendor quotes (total, unit, breakdown, optimizations) + cheapest_vendor.
+        """
+        try:
+            client = get_client()
+            params: dict[str, Any] = {
+                "layers": layers, "width_mm": width_mm, "height_mm": height_mm,
+                "qty": qty, "finish": finish, "color": color, "copper_oz": copper_oz,
+                "thickness_mm": thickness_mm, "via_in_pad": via_in_pad,
+                "castellated": castellated,
+            }
+            if min_trace_mm is not None:
+                params["min_trace_mm"] = min_trace_mm
+            if vendors:
+                params["vendors"] = vendors
+            result = client.get_fab_quote(params)
+            data = result.get("data", result) if isinstance(result, dict) else result
+            return {"success": True, **(data if isinstance(data, dict) else {"result": data})}
+        except SourcePartsAPIError as e:
+            logger.error(f"Fab quote failed: {e}")
+            return {"success": False, "error": f"Fab quote failed: {e}"}
+
+    @mcp.tool()
+    @with_user_context
     async def check_dfm_status(job_id: str) -> dict[str, Any]:
         """Check the status of a DFM analysis job.
 
