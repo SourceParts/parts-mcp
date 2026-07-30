@@ -168,7 +168,7 @@ def register_assembly_pipeline_tools(mcp: FastMCP) -> None:
             import httpx
 
             base = client.base_url if client.base_url.endswith('/') else client.base_url + '/'
-            url = urljoin(base, "assembly/feeder-setup")
+            url = urljoin(base, "assembly/feeder/setup")
 
             upload_headers = {
                 "Authorization": f"Bearer {client.api_key}",
@@ -259,7 +259,7 @@ def register_assembly_pipeline_tools(mcp: FastMCP) -> None:
                 bom_data = f.read()
 
             result = client._make_upload_request(
-                "assembly/reflow-profile",
+                "assembly/reflow/profile",
                 file_data=bom_data,
                 filename=os.path.basename(bom_path),
                 content_type="text/csv",
@@ -430,7 +430,7 @@ def register_assembly_pipeline_tools(mcp: FastMCP) -> None:
                 form_fields["criteria"] = json.dumps(criteria)
 
             result = client._make_upload_request(
-                "assembly/functional-test",
+                "test/functional",
                 file_data=results_data,
                 filename=os.path.basename(results_path),
                 content_type="text/csv",

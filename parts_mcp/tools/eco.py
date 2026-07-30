@@ -12,7 +12,7 @@ push commits or create PRs. For local operations, use the `parts` CLI:
     parts project eco get ECO-001
     parts project eco create --id ECO-002 --title "..." --revision "EVT2"
     parts project eco approve ECO-001
-    parts project eco build-status
+    parts project eco status
 """
 import logging
 from typing import Any
@@ -312,11 +312,11 @@ def register_eco_tools(mcp: FastMCP) -> None:
         try:
             client = get_client()
             return client._make_request(
-                "GET", f"projects/{project_id}/ecos/build-status",
+                "GET", f"projects/{project_id}/ecos/build/status",
                 base_url=client._project_base_url(),
             )
         except SourcePartsAPIError as e:
             return {"error": str(e)}
         except Exception as e:
-            logger.error("ECO build-status failed: %s", e)
+            logger.error("ECO build status failed: %s", e)
             return {"error": str(e)}
