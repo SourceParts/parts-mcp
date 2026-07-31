@@ -199,8 +199,12 @@ def register_manufacturing_tools(mcp: FastMCP, local_mode: bool = True) -> None:
         separates parts into matched and unmatched lists. Unknown parts are
         highlighted so you can see which components need attention.
 
+        Note: the upload_bom tool that produces these job IDs needs filesystem
+        access and is only registered in local mode. In hosted mode submit the
+        BOM to POST /v1/bom directly to obtain a job_id.
+
         Args:
-            job_id: Job ID returned from upload_bom
+            job_id: Job ID returned from upload_bom (local mode) or POST /v1/bom
 
         Returns:
             Processing status with matched/unmatched part breakdown when complete

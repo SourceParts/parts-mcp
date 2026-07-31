@@ -7,13 +7,10 @@ here — they need integration tests against a live landing-page API.
 """
 from __future__ import annotations
 
-import json
-
-import pytest
+from datetime import date
 
 from parts_mcp.tools.wip import (
     WIP_REPORT_TEMPLATE,
-    _AUDIT_RULES,
     _run_audit,
     _sanitize_slug,
 )
@@ -39,20 +36,22 @@ class TestSanitizeSlug:
 
 class TestAudit:
     def test_clean_report_has_no_findings(self):
-        md = """# Rev A — Status
+        # The audit flags stale dates, so this has to be generated, not literal.
+        today = date.today().isoformat()
+        md = f"""# Rev A — Status
 
 | Field      | Value                  |
 |------------|------------------------|
 | Project    | demo                   |
 | Report     | WiP-2026-05-17-demo    |
-| Date       | %s |
+| Date       | {today} |
 | Prepared by| Source Parts Inc.      |
 | Status     | Engineering work in progress |
 
 ## Executive summary
 
 All looks good.
-""" % __import__("datetime").date.today().isoformat()
+"""
         findings = _run_audit(md)
         # The template-author-checklist marker is absent, dates are
         # current, no IP-leak patterns. Expect no error-severity hits.

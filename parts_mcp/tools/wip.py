@@ -29,7 +29,6 @@ from typing import Any
 import httpx
 from fastmcp import FastMCP
 
-
 LANDING_PAGE_BASE = os.environ.get(
     "PARTS_LANDING_URL", "https://source.parts"
 ).rstrip("/")

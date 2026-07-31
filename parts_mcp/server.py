@@ -202,6 +202,13 @@ def create_server(server_cfg: ServerConfig, auth_cfg: AuthConfig, storage_cfg: S
     register_sch_repair_tools(mcp)
     logger.info("Registered sch_repair tools")
 
+    # KiCad export tools (parts eda export sch mirror). Hosted-capable: the
+    # filesystem arguments are gated inside the tool, so a hosted caller passes
+    # the schematic text rather than finding the tool absent.
+    from parts_mcp.tools.eda_export import register_eda_export_tools
+    register_eda_export_tools(mcp, local_mode=not hosted)
+    logger.info("Registered eda_export tools")
+
     # User profile, preferences, and device management
     from parts_mcp.tools.preferences import register_preference_tools
     register_preference_tools(mcp)
