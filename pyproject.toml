@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "parts-mcp"
-version = "0.5.0"
+version = "0.5.1"
 description = "Model Context Protocol (MCP) server for electronic parts sourcing with KiCad integration"
 readme = "README.md"
 license = { text = "MIT" }
@@ -129,3 +129,6 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+markers = [
+    "integration: integration tests that reach live services (deselect with '-m \"not integration\"')",
+]
