@@ -498,7 +498,7 @@ def register_test_pipeline_tools(mcp: FastMCP) -> None:
                 json_data["failure_data"]["lot_correlation"] = lot_correlation
 
             result = client._make_request(
-                "POST", "/v1/post-production/eco-feedback", json_data=json_data
+                "POST", "/v1/post-production/eco/feedback", json_data=json_data
             )
 
             ecns = result.get("suggested_ecns", [])

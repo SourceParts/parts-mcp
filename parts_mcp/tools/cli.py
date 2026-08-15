@@ -178,8 +178,11 @@ _CLI_REFERENCE = """
 ### Resistor color bands
   parts resistor <bands>
 
-### Part marking lookup
-  parts marking <code>
+### Part marking info (takes a PART NUMBER, returns that part's marking)
+  parts marking <partNumber>
+
+### Marking code -> candidate parts (reverse lookup)
+  parts marking --reverse <code>    # or use the search_by_marking MCP tool
 
 ## IQC / Ingest
 

@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import json
 import math
-import os
 from pathlib import Path
 from typing import Any
 
@@ -106,23 +105,23 @@ def _sch_v1_post(
 ) -> dict[str, Any]:
     """POST to api.source.parts/v1/<endpoint> with multipart files.
 
-    Uses httpx directly because the shared client._make_upload_request
-    only supports a single file under the field name 'file', while
-    these endpoints expect specific field names + sub_sheets arrays.
+    Uses httpx directly because *files* is a list, not a dict: /v1/sch/libsync
+    repeats the 'sub_sheets' field once per sub-sheet, which the client's
+    dict-keyed upload helpers cannot express.
+
+    Headers come from the client so the OAuth token set by with_user_context is
+    honoured. Reading client.api_key directly, as this did, meant every sch_*
+    tool authenticated as the static key and failed outright in hosted mode.
     """
     from parts_mcp.utils.api_client import get_client
 
     client = get_client()
     url = client._resolve_url(endpoint)
-    headers = {
-        "Authorization": f"Bearer {client.api_key}",
-        "User-Agent": "PARTS-MCP/1.0",
-    }
     response = httpx.post(
         url,
         files=files,
         data=form_fields or {},
-        headers=headers,
+        headers=client._context_headers(),
         timeout=120.0,
     )
     response.raise_for_status()

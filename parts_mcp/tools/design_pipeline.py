@@ -59,7 +59,7 @@ def register_design_pipeline_tools(mcp: FastMCP) -> None:
                 sch_data = f.read()
 
             result = client._make_upload_request(
-                "design/schematic-review",
+                "design/review/schematic",
                 file_data=sch_data,
                 filename=os.path.basename(project_path),
                 content_type="application/octet-stream",

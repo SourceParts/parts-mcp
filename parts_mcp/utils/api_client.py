@@ -285,32 +285,35 @@ class SourcePartsClient:
                     f"API error {e.response.status_code}: {error_detail or e}"
                 ) from e
 
-    def _make_upload_request(
+    def _make_multipart_request(
         self,
         endpoint: str,
-        file_data: bytes,
-        filename: str,
-        content_type: str = "application/octet-stream",
+        files: dict[str, tuple[str, bytes, str]],
         form_fields: dict[str, str] | None = None,
         retry_count: int = 3,
+        timeout: int | None = None,
     ) -> dict[str, Any]:
-        """Make a multipart file upload request with error handling and retries.
+        """POST one or more files as multipart, with retries and error mapping.
 
         Args:
             endpoint: API endpoint path
-            file_data: Raw file bytes
-            filename: Name of the file being uploaded
-            content_type: MIME type of the file
+            files: {form_field: (filename, data, content_type)}. Endpoints
+                differ in the field name they read — most want "file", but
+                /v1/eda/netlist/diff wants old_file/new_file.
             form_fields: Additional form fields to include
             retry_count: Number of retries on failure
+            timeout: Seconds to wait, default SEARCH_TIMEOUT. Raise it for
+                endpoints that shell out server-side — the kicad-cli exports
+                allow themselves 120s, well past the search default.
 
         Returns:
-            API response data
+            API response data, unwrapped from the {status, data} envelope.
 
         Raises:
             SourcePartsAPIError: On API errors
         """
         url = self._resolve_url(endpoint)
+        request_timeout = SEARCH_TIMEOUT if timeout is None else timeout
 
         for attempt in range(retry_count):
             try:
@@ -320,15 +323,13 @@ class SourcePartsClient:
                 # sets the multipart boundary automatically.
                 upload_headers = self._context_headers()
 
-                files = {"file": (filename, file_data, content_type)}
-
                 response = httpx.request(
                     method="POST",
                     url=url,
                     files=files,
                     data=form_fields or {},
                     headers=upload_headers,
-                    timeout=SEARCH_TIMEOUT,
+                    timeout=request_timeout,
                 )
 
                 if response.status_code == 429:
@@ -396,6 +397,100 @@ class SourcePartsClient:
                 raise SourcePartsAPIError(
                     f"API error {e.response.status_code}: {error_detail or e}"
                 ) from e
+
+    def _make_upload_request(
+        self,
+        endpoint: str,
+        file_data: bytes,
+        filename: str,
+        content_type: str = "application/octet-stream",
+        form_fields: dict[str, str] | None = None,
+        retry_count: int = 3,
+        timeout: int | None = None,
+    ) -> dict[str, Any]:
+        """Upload a single file under the form field name "file"."""
+        return self._make_multipart_request(
+            endpoint,
+            files={"file": (filename, file_data, content_type)},
+            form_fields=form_fields,
+            retry_count=retry_count,
+            timeout=timeout,
+        )
+
+    # ------------------------------------------------------------------
+    # Public upload surface.
+    #
+    # Tool modules should use these rather than reaching for the private
+    # _make_* helpers. They are also the names parts_mcp.tools.kicad_ctrl has
+    # always called; the methods themselves went missing, which left all seven
+    # kicad_ctrl_* tools raising AttributeError into a bare except.
+    # ------------------------------------------------------------------
+
+    def upload_file(
+        self,
+        endpoint: str,
+        file_data: bytes,
+        filename: str,
+        content_type: str = "application/octet-stream",
+        options: dict[str, str] | None = None,
+        timeout: int | None = None,
+    ) -> dict[str, Any]:
+        """Upload one file and return the decoded JSON response.
+
+        *options* becomes the multipart form fields; it is spelled "options"
+        because that is what the call sites use.
+        """
+        return self._make_upload_request(
+            endpoint,
+            file_data=file_data,
+            filename=filename,
+            content_type=content_type,
+            form_fields=options,
+            timeout=timeout,
+        )
+
+    def upload_files(
+        self,
+        endpoint: str,
+        files: dict[str, tuple[str, bytes, str]],
+        options: dict[str, str] | None = None,
+        timeout: int | None = None,
+    ) -> dict[str, Any]:
+        """Upload several files at once, each under its own form field name.
+
+        For endpoints that compare inputs rather than process one — e.g.
+        /v1/eda/netlist/diff, which reads old_file and new_file.
+        """
+        return self._make_multipart_request(
+            endpoint,
+            files=files,
+            form_fields=options,
+            timeout=timeout,
+        )
+
+    def upload_file_raw(
+        self,
+        endpoint: str,
+        file_data: bytes,
+        filename: str,
+        content_type: str = "application/octet-stream",
+        options: dict[str, str] | None = None,
+        timeout: int = 300,
+    ) -> bytes:
+        """Upload one file and return the raw response body.
+
+        For endpoints answering with a binary payload rather than JSON — e.g.
+        /v1/eda/export, which returns a ZIP of gerbers. *content_type* is
+        accepted for call-site symmetry; the conversion path always sends
+        application/octet-stream.
+        """
+        return self._make_file_conversion(
+            endpoint,
+            file_data=file_data,
+            filename=filename,
+            form_data=options,
+            timeout=timeout,
+        )
 
     def search_parts(
         self,
@@ -470,6 +565,36 @@ class SourcePartsClient:
             return self._make_request('GET', f'/parts/{sku}')
         except Exception as e:
             logger.error(f"Failed to get part details: {e}")
+            raise
+
+    def search_by_marking(self, code: str, limit: int = 10) -> dict[str, Any]:
+        """Resolve a top-marking code to candidate parts.
+
+        Inverse of the per-part marking lookup: the code printed on the
+        package goes in, ranked candidates come out. Markings are not
+        unique, so each candidate carries a "match" lane — catalog (stored
+        marking equals the code), identified (a prior identify.parts
+        recognition of this code), or mpn (MPN starts/ends with the code).
+
+        Args:
+            code: The marking as printed on the package (e.g. "F407VG")
+            limit: Maximum candidates per match lane (max 25)
+
+        Returns:
+            {"code": ..., "candidates": [...], "counts": {...}}
+
+        Raises:
+            SourcePartsAPIError: On failure, including 404 when no lane
+                produced a candidate.
+        """
+        logger.info(f"Searching parts by marking: {code}")
+
+        try:
+            return self._make_request(
+                'GET', f'/parts/marking/{code}', params={'limit': limit}
+            )
+        except Exception as e:
+            logger.error(f"Marking search failed: {e}")
             raise
 
     def get_part_pricing(
@@ -1042,6 +1167,16 @@ class SourcePartsClient:
             return self._make_request('POST', '/manufacturing/dfm', json_data=json_data)
         except Exception as e:
             logger.error(f"DFM submission failed: {e}")
+            raise
+
+    def get_fab_quote(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Get cross-vendor PCB fab quotes + cost-driver breakdown + optimization
+        tips for explicit board params (POST /v1/fab/quote, JSON mode)."""
+        logger.info("Requesting fab quote")
+        try:
+            return self._make_request('POST', '/fab/quote', json_data=params)
+        except Exception as e:
+            logger.error(f"Fab quote failed: {e}")
             raise
 
     def upload_dfm(

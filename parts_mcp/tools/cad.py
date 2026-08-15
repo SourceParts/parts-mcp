@@ -30,9 +30,6 @@ import httpx
 from fastmcp import FastMCP
 
 from parts_mcp.utils.api_client import (
-    SourcePartsAPIError,
-    SourcePartsAuthError,
-    SourcePartsRateLimitError,
     get_client,
     with_user_context,
 )
@@ -187,9 +184,33 @@ def register_cad_tools(mcp: FastMCP) -> None:
         temp file and the path is returned — chain calls by passing the
         previous output_path back in.
 
-        Operation kinds supported (see Source Parts API docs for params):
-            translate, rotate, drill, boss, fillet, chamfer,
-            cut, union, intersect, mirror_y, linear_pattern
+        Operation schemas. These are exact, and not guessable — translate takes
+        "offset" not "vector", chamfer takes "length" not "distance", and rotate
+        takes an axis as two points rather than a direction vector. The API
+        rejects an op with a missing or misspelled field.
+
+            {"kind": "translate", "offset": [x, y, z]}
+            {"kind": "rotate", "axis_start": [x,y,z], "axis_end": [x,y,z],
+             "angle_deg": 90}
+            {"kind": "drill", "radius": R, "depth": D, "at": [x, y, z]}
+            {"kind": "boss", "outer_radius": R, "height": H, "at": [x, y, z],
+             "inner_radius": r}                  # inner_radius optional
+            {"kind": "fillet",  "radius": R}     # all edges
+            {"kind": "chamfer", "length": L}     # all edges
+            {"kind": "cut",       "shape": <primitive>}
+            {"kind": "union",     "shape": <primitive>}
+            {"kind": "intersect", "shape": <primitive>}
+            {"kind": "mirror_y", "plane_y": Y}
+            {"kind": "linear_pattern", "feature": <primitive>,
+             "direction": [x,y,z], "spacing": S, "count": N}
+
+        <primitive> is cylinder, box or sphere, each taking an optional "at":
+
+            {"primitive": "cylinder", "radius": R, "height": H, "at": [x,y,z]}
+
+        Ops apply in order, each to the result of the previous one. Coordinates
+        are in the file's own frame — check it with cad_inspect_step first, since
+        an op placed outside the solid succeeds and changes nothing.
 
         Example — drill four corner holes:
             cad_modify_step(

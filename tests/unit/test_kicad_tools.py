@@ -4,15 +4,14 @@ Unit tests for the KiCad MCP tools (convert_allegro et al.).
 Extracts registered tool functions from a stub FastMCP and calls them
 directly to test business logic without running a live MCP server.
 """
-import zipfile
 import io
+import zipfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from parts_mcp.utils.api_client import SourcePartsAPIError
-
 
 # ---------------------------------------------------------------------------
 # Minimal FastMCP stub — captures @mcp.tool() registrations
