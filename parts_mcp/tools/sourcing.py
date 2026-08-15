@@ -9,6 +9,7 @@ from fastmcp import FastMCP
 
 from parts_mcp.utils.api_client import SourcePartsAPIError, get_client, with_user_context
 from parts_mcp.utils.cache import cache_pricing_data, cache_search_results
+from parts_mcp.utils.matching import describe_candidate, verify_mpn_match
 
 logger = logging.getLogger(__name__)
 
@@ -28,15 +29,27 @@ def register_sourcing_tools(mcp: FastMCP) -> None:
         quantity: int = 1,
         suppliers: list[str] | None = None
     ) -> dict[str, Any]:
-        """Compare prices for a part across multiple suppliers.
+        """Get Source Parts catalog pricing for a part at a quantity.
+
+        Single-source: prices come from the Source Parts catalog only.
+        Per-supplier comparison (DigiKey, Mouser, …) is NOT supported — a
+        `suppliers` list is acknowledged with a warning, never silently
+        honored. `best_price` is therefore the catalog price at the best
+        applicable quantity break, not a cross-supplier minimum.
+
+        Refuses to price fuzzy matches: if the catalog's closest hit is not
+        an exact (normalized) match for `part_number`, the response is
+        success=False naming the closest candidate instead of pricing a
+        different part.
 
         Args:
-            part_number: Part number to check
+            part_number: Exact part number (MPN) or Source Parts SKU
             quantity: Quantity needed
-            suppliers: Optional list of suppliers to check
+            suppliers: Not supported — present for compatibility; a warning
+                is returned when passed
 
         Returns:
-            Price comparison data
+            Catalog pricing data with price_source and match_verified
         """
         try:
             client = get_client()
@@ -53,13 +66,43 @@ def register_sourcing_tools(mcp: FastMCP) -> None:
                 }
 
             part_data = search_results['results'][0]
+
+            # Never price a part the caller didn't name: a fuzzy top hit
+            # here silently costs the wrong component (field test: a 10uH
+            # inductor priced as a $3.24 tactile switch).
+            if not verify_mpn_match(part_number, part_data):
+                return {
+                    "part_number": part_number,
+                    "quantity": quantity,
+                    "match_verified": False,
+                    "closest_match": describe_candidate(part_data),
+                    "error": (
+                        f"No exact catalog match for '{part_number}' — the "
+                        "closest candidate is a different part, so it was "
+                        "not priced."
+                    ),
+                    "hint": (
+                        "Use search_parts to inspect candidates; if one is "
+                        "correct, call compare_prices with its exact part "
+                        "number or SKU."
+                    ),
+                    "success": False
+                }
+
             sku = part_data.get('sku', part_data.get('part_number'))
 
-            # Get pricing data from the API
+            # Get pricing data from the API. A pricing 404 is a data gap,
+            # not a failure — degrade to "no pricing data".
+            pricing_data = {}
+            pricing_note = None
             if sku:
-                pricing_data = client.get_part_pricing(sku, quantity=quantity)
-            else:
-                pricing_data = {}
+                try:
+                    pricing_data = client.get_part_pricing(sku, quantity=quantity)
+                except SourcePartsAPIError as e:
+                    if "404" in str(e):
+                        pricing_note = f"No pricing data for {sku}"
+                    else:
+                        raise
 
             # The API returns {"part_number": ..., "price_breaks": [...]}
             # Each price break is {"quantity": N, "unit_price": X}
@@ -96,14 +139,26 @@ def register_sourcing_tools(mcp: FastMCP) -> None:
                     'lead_time': f"{part_data.get('lead_time_days', 0)} days" if part_data.get('lead_time_days') else 'Check supplier'
                 })
 
-            return {
+            response = {
                 "part_number": part_number,
                 "quantity": quantity,
+                "price_source": "source_parts_catalog",
+                "match_verified": True,
                 "suppliers_checked": len(prices),
                 "prices": prices,
                 "best_price": prices[0] if prices else None,
                 "success": True
             }
+            if pricing_note and not prices:
+                response["message"] = pricing_note
+            if suppliers:
+                response["suppliers_requested"] = suppliers
+                response["warning"] = (
+                    "Per-supplier comparison is not supported — the "
+                    "suppliers parameter was not used. Prices are from the "
+                    "Source Parts catalog only."
+                )
+            return response
 
         except SourcePartsAPIError as e:
             logger.error(f"Error comparing prices: {e}")
@@ -175,15 +230,22 @@ def register_sourcing_tools(mcp: FastMCP) -> None:
                             'sku': sku
                         })
 
-                    availability.append({
+                    row = {
                         'part_number': part_number,
                         'quantity_needed': qty_needed,
                         'available': total_stock >= qty_needed,
                         'total_stock': total_stock,
                         'in_stock_suppliers': in_stock_suppliers,
                         'manufacturer': part_data.get('manufacturer'),
-                        'description': part_data.get('description')
-                    })
+                        'description': part_data.get('description'),
+                        'match_verified': verify_mpn_match(part_number, part_data),
+                    }
+                    if not row['match_verified']:
+                        row['match_warning'] = (
+                            'Closest catalog hit is not an exact match — '
+                            'stock shown may be for a different part.'
+                        )
+                    availability.append(row)
                 else:
                     availability.append({
                         'part_number': part_number,
@@ -317,6 +379,24 @@ def register_sourcing_tools(mcp: FastMCP) -> None:
                         }
 
                     part_data = search_results['results'][0]
+
+                    # A fuzzy hit priced into a BOM total is silent poison —
+                    # report the line as unmatched instead of costing a
+                    # different component.
+                    if not verify_mpn_match(part_number, part_data):
+                        closest = describe_candidate(part_data)
+                        return None, {
+                            'reference': item.get('reference', ''),
+                            'part_number': part_number,
+                            'match_verified': False,
+                            'closest_match': closest,
+                            'error': (
+                                'No exact catalog match — closest was '
+                                f"'{closest.get('part_number')}' "
+                                f"({closest.get('sku')}); not priced"
+                            )
+                        }
+
                     sku = part_data.get('sku', part_data.get('part_number'))
 
                     if not sku:
@@ -326,9 +406,19 @@ def register_sourcing_tools(mcp: FastMCP) -> None:
                             'error': 'No SKU found for part'
                         }
 
-                    pricing_data = await loop.run_in_executor(
-                        None, lambda: client.get_part_pricing(sku, quantity=part_qty)
-                    )
+                    try:
+                        pricing_data = await loop.run_in_executor(
+                            None, lambda: client.get_part_pricing(sku, quantity=part_qty)
+                        )
+                    except SourcePartsAPIError as e:
+                        if "404" in str(e):
+                            return None, {
+                                'reference': item.get('reference', ''),
+                                'part_number': part_number,
+                                'sku': sku,
+                                'error': 'No pricing data'
+                            }
+                        raise
                     price_breaks = pricing_data.get('price_breaks', [])
 
                     unit_price = None

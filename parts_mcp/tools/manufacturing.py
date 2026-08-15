@@ -1,6 +1,7 @@
 """
 Manufacturing and BOM tools for DFM analysis and BOM processing.
 """
+import base64
 import logging
 import mimetypes
 import time
@@ -503,7 +504,8 @@ def register_manufacturing_tools(mcp: FastMCP, local_mode: bool = True) -> None:
         """Check the status of a PCB/component identification job.
 
         Args:
-            job_id: Job ID returned from identify_pcb
+            job_id: Job ID returned from identify_pcb (which accepts a
+                file_path locally or image_base64 when hosted)
 
         Returns:
             Status with identified items when complete
@@ -567,6 +569,135 @@ def register_manufacturing_tools(mcp: FastMCP, local_mode: bool = True) -> None:
                 "success": False,
                 "short_code": short_code,
                 "error": f"Failed to get item: {e}",
+            }
+
+    @mcp.tool()
+    @with_user_context
+    async def identify_pcb(
+        file_path: str | None = None,
+        image_base64: str | None = None,
+        filename: str | None = None,
+        project_id: str | None = None,
+        box_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Identify a PCB or component from a photo.
+
+        Uploads an image for barcode/QR code detection, OCR text extraction,
+        and component identification. Poll the returned job with
+        check_identification_status; fetch finished items with
+        get_identified_item.
+
+        Supply exactly one of file_path or image_base64. file_path needs
+        filesystem access, so it works in local mode only; hosted callers
+        pass the image bytes base64-encoded, with filename set so the
+        image type can be inferred (defaults to photo.jpg).
+
+        Args:
+            file_path: Path to the image file (jpg, png, gif, heic, webp) —
+                local mode only
+            image_base64: Base64-encoded image bytes, for hosted mode
+            filename: Name for the uploaded image when using image_base64
+            project_id: Optional project ID to associate
+            box_id: Optional box/shipment ID to associate
+
+        Returns:
+            Identification job info — poll with check_identification_status
+        """
+        valid_extensions = {".jpg", ".jpeg", ".png", ".gif", ".heic", ".webp"}
+
+        if file_path and image_base64:
+            return {
+                "success": False,
+                "error": "pass only one of file_path or image_base64",
+            }
+        if not file_path and not image_base64:
+            return {
+                "success": False,
+                "error": "one of file_path or image_base64 is required",
+            }
+        if not local_mode and file_path:
+            return {
+                "success": False,
+                "error": (
+                    "file_path needs filesystem access, which this hosted "
+                    "server does not have. Pass the image as image_base64 "
+                    "instead."
+                ),
+            }
+
+        try:
+            if file_path:
+                path = Path(file_path).expanduser().resolve()
+
+                if not path.exists():
+                    return {
+                        "success": False,
+                        "file_path": file_path,
+                        "error": f"File not found: {path}",
+                    }
+
+                if not path.is_file():
+                    return {
+                        "success": False,
+                        "file_path": file_path,
+                        "error": f"Not a file: {path}",
+                    }
+
+                if path.suffix.lower() not in valid_extensions:
+                    return {
+                        "success": False,
+                        "file_path": file_path,
+                        "error": f"Unsupported image format: {path.suffix}. Use: {', '.join(sorted(valid_extensions))}",
+                    }
+
+                upload_name = path.name
+                file_data = path.read_bytes()
+            else:
+                upload_name = filename or "photo.jpg"
+                suffix = Path(upload_name).suffix.lower()
+                if suffix not in valid_extensions:
+                    return {
+                        "success": False,
+                        "filename": upload_name,
+                        "error": f"Unsupported image format: {suffix or '(none)'}. Use: {', '.join(sorted(valid_extensions))}",
+                    }
+                try:
+                    file_data = base64.b64decode(image_base64, validate=True)
+                except (ValueError, TypeError) as e:
+                    return {
+                        "success": False,
+                        "error": f"image_base64 is not valid base64: {e}",
+                    }
+
+            content_type = mimetypes.guess_type(upload_name)[0] or "image/jpeg"
+
+            client = get_client()
+            result = client.upload_for_identification(
+                file_data=file_data,
+                filename=upload_name,
+                content_type=content_type,
+                project_id=project_id,
+                box_id=box_id,
+            )
+
+            return {
+                "success": True,
+                "result": result,
+                "file": upload_name,
+                "message": "Image uploaded for identification",
+            }
+
+        except SourcePartsAPIError as e:
+            logger.error(f"PCB identification failed: {e}")
+            return {
+                "success": False,
+                "error": f"Identification failed: {e}",
+            }
+        except OSError as e:
+            logger.error(f"File read error: {e}")
+            return {
+                "success": False,
+                "error": f"Could not read file: {e}",
             }
 
     # =========================================================================
@@ -789,84 +920,4 @@ def register_manufacturing_tools(mcp: FastMCP, local_mode: bool = True) -> None:
                 logger.error(f"File read error: {e}")
                 return {"success": False, "error": f"Could not read file: {e}"}
 
-        @mcp.tool()
-        @with_user_context
-        async def identify_pcb(
-            file_path: str,
-            project_id: str | None = None,
-            box_id: str | None = None,
-        ) -> dict[str, Any]:
-            """Identify a PCB or component from a photo.
-
-            Uploads an image for barcode/QR code detection, OCR text extraction,
-            and component identification.
-
-            Args:
-                file_path: Path to the image file (jpg, png, gif, heic, webp)
-                project_id: Optional project ID to associate
-                box_id: Optional box/shipment ID to associate
-
-            Returns:
-                Identification results with barcodes, OCR text, and metadata
-            """
-            valid_extensions = {".jpg", ".jpeg", ".png", ".gif", ".heic", ".webp"}
-
-            try:
-                path = Path(file_path).expanduser().resolve()
-
-                if not path.exists():
-                    return {
-                        "success": False,
-                        "file_path": file_path,
-                        "error": f"File not found: {path}",
-                    }
-
-                if not path.is_file():
-                    return {
-                        "success": False,
-                        "file_path": file_path,
-                        "error": f"Not a file: {path}",
-                    }
-
-                if path.suffix.lower() not in valid_extensions:
-                    return {
-                        "success": False,
-                        "file_path": file_path,
-                        "error": f"Unsupported image format: {path.suffix}. Use: {', '.join(sorted(valid_extensions))}",
-                    }
-
-                content_type = mimetypes.guess_type(str(path))[0] or "image/jpeg"
-                file_data = path.read_bytes()
-
-                client = get_client()
-                result = client.upload_for_identification(
-                    file_data=file_data,
-                    filename=path.name,
-                    content_type=content_type,
-                    project_id=project_id,
-                    box_id=box_id,
-                )
-
-                return {
-                    "success": True,
-                    "result": result,
-                    "file": path.name,
-                    "message": "Image uploaded for identification",
-                }
-
-            except SourcePartsAPIError as e:
-                logger.error(f"PCB identification failed: {e}")
-                return {
-                    "success": False,
-                    "file_path": file_path,
-                    "error": f"Identification failed: {e}",
-                }
-            except OSError as e:
-                logger.error(f"File read error: {e}")
-                return {
-                    "success": False,
-                    "file_path": file_path,
-                    "error": f"Could not read file: {e}",
-                }
-
-        logger.info("Registered local-mode manufacturing tools (upload_gerbers_for_quote, quote_assembly, identify_pcb)")
+        logger.info("Registered local-mode manufacturing tools (upload_gerbers_for_quote, quote_assembly)")

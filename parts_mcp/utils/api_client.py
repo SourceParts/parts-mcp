@@ -567,6 +567,36 @@ class SourcePartsClient:
             logger.error(f"Failed to get part details: {e}")
             raise
 
+    def search_by_marking(self, code: str, limit: int = 10) -> dict[str, Any]:
+        """Resolve a top-marking code to candidate parts.
+
+        Inverse of the per-part marking lookup: the code printed on the
+        package goes in, ranked candidates come out. Markings are not
+        unique, so each candidate carries a "match" lane — catalog (stored
+        marking equals the code), identified (a prior identify.parts
+        recognition of this code), or mpn (MPN starts/ends with the code).
+
+        Args:
+            code: The marking as printed on the package (e.g. "F407VG")
+            limit: Maximum candidates per match lane (max 25)
+
+        Returns:
+            {"code": ..., "candidates": [...], "counts": {...}}
+
+        Raises:
+            SourcePartsAPIError: On failure, including 404 when no lane
+                produced a candidate.
+        """
+        logger.info(f"Searching parts by marking: {code}")
+
+        try:
+            return self._make_request(
+                'GET', f'/parts/marking/{code}', params={'limit': limit}
+            )
+        except Exception as e:
+            logger.error(f"Marking search failed: {e}")
+            raise
+
     def get_part_pricing(
         self,
         part_id: str,

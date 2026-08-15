@@ -13,6 +13,7 @@ from parts_mcp.utils.api_client import (
     with_user_context,
 )
 from parts_mcp.utils.cache import cache_part_details, cache_search_results
+from parts_mcp.utils.matching import verify_mpn_match
 
 logger = logging.getLogger(__name__)
 
@@ -60,15 +61,32 @@ def register_search_tools(mcp: FastMCP) -> None:
                 offset=0
             )
 
+            # Annotate every result with match_verified so callers can tell
+            # an exact part-number hit from a fuzzy suggestion — the search
+            # backend scores fuzzily and returns no quality signal of its own.
+            result_rows = results.get('results', [])
+            for row in result_rows:
+                if isinstance(row, dict):
+                    row['match_verified'] = verify_mpn_match(query, row)
+
             # Format results
             formatted_results = {
                 "query": query,
                 "category": category,
                 "filters": filters or {},
-                "results": results.get('results', []),
+                "results": result_rows,
                 "total_results": results.get('total', 0),
+                "match_verified": bool(result_rows)
+                and bool(result_rows[0].get('match_verified')),
                 "success": True
             }
+
+            if result_rows and not formatted_results["match_verified"]:
+                formatted_results["match_warning"] = (
+                    f"No result is an exact match for '{query}' — these are "
+                    "fuzzy suggestions. Verify the part number before pricing "
+                    "or ordering."
+                )
 
             # Surface external supplier search status to AI assistants
             if results.get('sync_status'):
@@ -183,6 +201,91 @@ def register_search_tools(mcp: FastMCP) -> None:
             }
 
     @mcp.tool()
+    @cache_search_results()
+    @with_user_context
+    async def search_by_marking(
+        code: str,
+        limit: int = 10
+    ) -> dict[str, Any]:
+        """Resolve an IC/SMD top-marking code to candidate parts.
+
+        The code printed on a package (e.g. "F407VG" on an STM32, "UADD" on
+        a SOT-23) goes in; ranked candidate parts come out. Markings are not
+        unique across vendors, so treat the answer as candidates to confirm
+        against package and pinout, not a definitive ID. Each candidate
+        carries a "match" lane:
+
+            catalog    — a part whose stored marking equals the code
+            identified — a prior identify.parts photo recognition that read
+                         this code (returns its mpn_candidates)
+            mpn        — a part whose MPN starts or ends with the code
+                         (many markings are MPN fragments; vendor-assigned
+                         codes will not hit this lane)
+
+        Use search_parts for MPNs and keywords; use this when all you have
+        is the code on the chip.
+
+        Args:
+            code: The marking as printed on the package
+            limit: Maximum candidates per match lane (max 25)
+
+        Returns:
+            Candidates grouped in one ranked list, with per-lane counts
+        """
+        try:
+            client = get_client()
+            result = client.search_by_marking(code=code, limit=limit)
+
+            candidates = result.get("candidates", [])
+            return {
+                "code": result.get("code", code),
+                "candidates": candidates,
+                "counts": result.get("counts", {}),
+                "total_candidates": len(candidates),
+                "success": True,
+            }
+
+        except SourcePartsAuthError as e:
+            logger.error(f"Authentication error: {e}")
+            return {
+                "code": code,
+                "error": "Authentication failed. Please check your API key.",
+                "success": False,
+            }
+
+        except SourcePartsAPIError as e:
+            logger.error(f"Marking search error: {e}")
+            error_str = str(e)
+
+            if "404" in error_str:
+                return {
+                    "code": code,
+                    "candidates": [],
+                    "error": f"No candidate parts known for marking '{code}'.",
+                    "message": (
+                        "No stored marking, prior identification, or MPN "
+                        "fragment matched. A photo run through identify_pcb "
+                        "adds this marking to the identification history for "
+                        "future lookups."
+                    ),
+                    "success": False,
+                }
+
+            return {
+                "code": code,
+                "error": f"Marking search failed: {error_str}",
+                "success": False,
+            }
+
+        except Exception as e:
+            logger.error(f"Unexpected error during marking search: {e}")
+            return {
+                "code": code,
+                "error": f"An unexpected error occurred: {str(e)}",
+                "success": False,
+            }
+
+    @mcp.tool()
     @cache_part_details()
     @with_user_context
     async def get_part_details(
@@ -220,6 +323,8 @@ def register_search_tools(mcp: FastMCP) -> None:
             part_data = search_results['results'][0]
             sku = part_data.get('sku', part_data.get('part_number'))
 
+            match_verified = verify_mpn_match(part_number, part_data)
+
             if sku:
                 # Get detailed information
                 details = client.get_part_details(sku)
@@ -228,6 +333,7 @@ def register_search_tools(mcp: FastMCP) -> None:
                     "part_number": part_number,
                     "manufacturer": manufacturer,
                     "details": details,
+                    "match_verified": match_verified,
                     "success": True
                 }
             else:
@@ -236,6 +342,7 @@ def register_search_tools(mcp: FastMCP) -> None:
                     "part_number": part_number,
                     "manufacturer": manufacturer,
                     "details": part_data,
+                    "match_verified": match_verified,
                     "success": True
                 }
 
