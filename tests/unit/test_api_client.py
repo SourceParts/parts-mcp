@@ -32,7 +32,11 @@ class TestSourcePartsClientInit:
         injected by with_user_context, so missing static key is non-fatal.
         """
         import logging
-        with patch.dict('os.environ', {'SOURCE_PARTS_API_KEY': ''}):
+        # Patch the module constant, not os.environ: it is resolved at import
+        # time and, since 0.5.3, may hold a credential from the developer's
+        # own CLI keychain — patching the env var alone leaves the test at
+        # the mercy of whoever last ran `parts auth login` on this machine.
+        with patch('parts_mcp.utils.api_client.SOURCE_PARTS_API_KEY', ''):
             with patch('parts_mcp.utils.api_client.httpx.Client'):
                 with caplog.at_level(logging.WARNING, logger='parts_mcp.utils.api_client'):
                     client = SourcePartsClient(api_key="")
