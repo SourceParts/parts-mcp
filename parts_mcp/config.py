@@ -5,8 +5,27 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+
+def _cli_keychain_key() -> str:
+    """Fall back to the parts CLI's credential store.
+
+    After `parts auth login`, the CLI saves credentials in the OS keychain
+    under service 'parts-cli' (account 'api-key'). A local MCP server should
+    honor that session instead of demanding a separate SOURCE_PARTS_API_KEY
+    env var — the field report's launcher-wrapper workaround existed only to
+    bridge this gap. Requires the optional `keyring` package; quietly skipped
+    when it (or a keychain) is absent, e.g. in the hosted container, which
+    authenticates per-request via OAuth and never reads this.
+    """
+    try:
+        import keyring
+        return keyring.get_password("parts-cli", "api-key") or ""
+    except Exception:
+        return ""
+
+
 # API Configuration
-SOURCE_PARTS_API_KEY = os.getenv("SOURCE_PARTS_API_KEY", "")
+SOURCE_PARTS_API_KEY = os.getenv("SOURCE_PARTS_API_KEY", "") or _cli_keychain_key()
 SOURCE_PARTS_API_URL = os.getenv("SOURCE_PARTS_API_URL", "https://api.source.parts/v1/")
 
 # Cache Configuration

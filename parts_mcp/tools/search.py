@@ -151,11 +151,22 @@ def register_search_tools(mcp: FastMCP) -> None:
         category: str,
         limit: int = 20
     ) -> dict[str, Any]:
-        """Search parts by specific parameters.
+        """Search parts by specific parameters within a category.
+
+        BOTH arguments are required — calling with only `parameters` fails
+        with missing_argument: category.
+
+        Example:
+            search_by_parameters(
+                parameters={"resistance": "10k", "tolerance": "1%",
+                            "package": "0603"},
+                category="resistor",
+            )
 
         Args:
-            parameters: Parametric search criteria
-            category: Part category
+            parameters: Parametric search criteria as {name: value}
+            category: Part category (required — e.g. "resistor",
+                "capacitor", "mosfet")
             limit: Maximum results
 
         Returns:
