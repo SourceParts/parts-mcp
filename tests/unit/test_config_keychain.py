@@ -12,21 +12,48 @@ from unittest.mock import patch
 from parts_mcp.config import _cli_keychain_key
 
 
-def _fake_keyring(value):
+def _fake_keyring(entries):
     mod = ModuleType("keyring")
     mod.get_password = lambda service, account: (
-        value if (service, account) == ("parts-cli", "api-key") else None
+        entries.get(account) if service == "parts-cli" else None
     )
     return mod
 
 
 class TestCliKeychainFallback:
     def test_reads_the_cli_api_key_entry(self):
-        with patch.dict(sys.modules, {"keyring": _fake_keyring("sp_live_abc")}):
+        with patch.dict(sys.modules, {"keyring": _fake_keyring({"api-key": "sp_live_abc"})}):
+            assert _cli_keychain_key() == "sp_live_abc"
+
+    def test_reads_public_build_oauth_access_token(self):
+        """`parts auth login` stores OAuth tokens, not an api-key — the
+        fallback must find the split-layout access token."""
+        with patch.dict(
+            sys.modules,
+            {"keyring": _fake_keyring({"oauth-access-token": "eyJhbGci.token"})},
+        ):
+            assert _cli_keychain_key() == "eyJhbGci.token"
+
+    def test_reads_private_build_combined_oauth_entry(self):
+        combined = '{"access_token": "eyJcombined.token", "refresh_token": "r"}'
+        with patch.dict(
+            sys.modules, {"keyring": _fake_keyring({"oauth-tokens": combined})}
+        ):
+            assert _cli_keychain_key() == "eyJcombined.token"
+
+    def test_api_key_wins_over_oauth(self):
+        entries = {"api-key": "sp_live_abc", "oauth-access-token": "eyJ.tok"}
+        with patch.dict(sys.modules, {"keyring": _fake_keyring(entries)}):
             assert _cli_keychain_key() == "sp_live_abc"
 
     def test_empty_when_entry_missing(self):
-        with patch.dict(sys.modules, {"keyring": _fake_keyring(None)}):
+        with patch.dict(sys.modules, {"keyring": _fake_keyring({})}):
+            assert _cli_keychain_key() == ""
+
+    def test_empty_when_combined_entry_is_malformed(self):
+        with patch.dict(
+            sys.modules, {"keyring": _fake_keyring({"oauth-tokens": "not json"})}
+        ):
             assert _cli_keychain_key() == ""
 
     def test_empty_when_keyring_absent(self):

@@ -9,17 +9,36 @@ from pathlib import Path
 def _cli_keychain_key() -> str:
     """Fall back to the parts CLI's credential store.
 
-    After `parts auth login`, the CLI saves credentials in the OS keychain
-    under service 'parts-cli' (account 'api-key'). A local MCP server should
-    honor that session instead of demanding a separate SOURCE_PARTS_API_KEY
-    env var — the field report's launcher-wrapper workaround existed only to
-    bridge this gap. Requires the optional `keyring` package; quietly skipped
-    when it (or a keychain) is absent, e.g. in the hosted container, which
-    authenticates per-request via OAuth and never reads this.
+    A local MCP server should honor an existing `parts auth login` session
+    instead of demanding a separate SOURCE_PARTS_API_KEY env var — the field
+    report's launcher-wrapper workaround (export the keychain token by hand)
+    existed only to bridge this gap.
+
+    The CLI builds use three keychain layouts under service 'parts-cli':
+      - 'api-key'            — a static API key, sent as-is
+      - 'oauth-access-token' — the public build's split OAuth entry
+      - 'oauth-tokens'       — the private build's combined JSON
+                               ({"access_token": ...})
+    An OAuth access token works wherever the env var does (the API accepts it
+    as a bearer), with the same limitation the wrapper had: it expires and a
+    fresh `parts auth login` renews it. Requires the `keyring` package;
+    quietly skipped when it (or a keychain) is absent, e.g. in the hosted
+    container, which authenticates per-request via OAuth and never reads this.
     """
     try:
         import keyring
-        return keyring.get_password("parts-cli", "api-key") or ""
+
+        value = keyring.get_password("parts-cli", "api-key")
+        if value:
+            return value
+        value = keyring.get_password("parts-cli", "oauth-access-token")
+        if value:
+            return value
+        combined = keyring.get_password("parts-cli", "oauth-tokens")
+        if combined:
+            import json
+            return json.loads(combined).get("access_token") or ""
+        return ""
     except Exception:
         return ""
 
