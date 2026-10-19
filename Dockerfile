@@ -1,9 +1,5 @@
 FROM registry.source.parts/infrastructure/base-images/python:3.12-slim AS base
 
-# Pull fixed Debian security packages even when the mirrored base tag is
-# briefly behind the distribution security repository.
-RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
-
 # Prevent Python from writing .pyc files and enable unbuffered output
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
