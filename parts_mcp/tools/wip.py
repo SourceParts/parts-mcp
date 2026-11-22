@@ -232,6 +232,23 @@ def _run_audit(markdown: str) -> list[dict]:
 # ----- HTTP helper for landing-page endpoints -----
 
 
+def _landing_headers(api_key: str | None = None) -> dict[str, str]:
+    """Headers for landing-page calls.
+
+    The doc/wip endpoints only accept Source Parts services (the shared
+    ``X-Internal-Secret``) or signed-in internal users. The hosted server sets
+    ``PARTS_INTERNAL_SECRET``; without it the request is anonymous and those
+    endpoints answer 401.
+    """
+    headers = {"User-Agent": "PARTS-MCP/1.0"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    secret = os.environ.get("PARTS_INTERNAL_SECRET", "").strip()
+    if secret:
+        headers["X-Internal-Secret"] = secret
+    return headers
+
+
 def _landing_post(
     path: str,
     json_payload: dict | None = None,
@@ -245,9 +262,7 @@ def _landing_post(
     api.source.parts.
     """
     url = f"{LANDING_PAGE_BASE}{path}"
-    headers = {"User-Agent": "PARTS-MCP/1.0"}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
+    headers = _landing_headers(api_key)
     if files:
         response = httpx.post(
             url, files=files, data=data, headers=headers, timeout=60.0
@@ -267,9 +282,7 @@ def _landing_get(
     api_key: str | None = None,
 ) -> dict[str, Any]:
     url = f"{LANDING_PAGE_BASE}{path}"
-    headers = {"User-Agent": "PARTS-MCP/1.0"}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
+    headers = _landing_headers(api_key)
     response = httpx.get(url, params=params or {}, headers=headers, timeout=30.0)
     response.raise_for_status()
     return response.json()
